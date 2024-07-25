@@ -1,0 +1,19 @@
+.{
+    .name = "zimport",
+    .version = "0.0.1",
+    .minimum_zig_version = "0.13.0",
+    .dependencies = .{
+        .uuid = .{
+            .url = "https://github.com/r4gus/uuid-zig/archive/refs/tags/0.2.1.tar.gz",
+            .hash = "1220b4deeb4ec1ec3493ea934905356384561b725dba69d1fbf6a25cb398716dd05b",
+        },
+    },
+    .paths = .{
+        ".gitignore",
+        "LICENSE",
+        "README.md",
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
