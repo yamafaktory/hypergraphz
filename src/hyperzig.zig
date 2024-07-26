@@ -311,6 +311,9 @@ test "add vertices to hyperedge" {
     try expect(vertices.len == nbVertices);
     for (ids, 0..) |id, i| {
         try expect(vertices[i] == id);
+        const hyperedges = try graph.getVertexHyperedges(id);
+        try expect(hyperedges.len == 1);
+        try expect(hyperedges[0] == hyperedgeId);
     }
 }
 
