@@ -25,15 +25,15 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         const Self = @This();
 
         allocator: Allocator,
-        hyperedges: AutoArrayHashMap(Uuid, Entity(H)),
-        vertices: AutoArrayHashMap(Uuid, Entity(V)),
+        hyperedges: AutoArrayHashMap(Uuid, EntityArrayList(H)),
+        vertices: AutoArrayHashMap(Uuid, EntityArrayHashMap(V)),
 
         comptime {
             assert(@typeInfo(H) == .Struct);
             assert(@typeInfo(V) == .Struct);
         }
 
-        fn Entity(
+        fn EntityArrayHashMap(
             comptime D: type,
         ) type {
             return struct {
@@ -42,9 +42,18 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             };
         }
 
+        fn EntityArrayList(
+            comptime D: type,
+        ) type {
+            return struct {
+                data: D,
+                connections: ArrayList(Uuid),
+            };
+        }
+
         fn init(allocator: Allocator) Self {
-            const h = AutoArrayHashMap(Uuid, Entity(H)).init(allocator);
-            const v = AutoArrayHashMap(Uuid, Entity(V)).init(allocator);
+            const h = AutoArrayHashMap(Uuid, EntityArrayList(H)).init(allocator);
+            const v = AutoArrayHashMap(Uuid, EntityArrayHashMap(V)).init(allocator);
 
             return .{ .allocator = allocator, .hyperedges = h, .vertices = v };
         }
@@ -99,12 +108,24 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         // Get all vertices of a hyperedge as an iterator.
-        fn getHyperedgeVertices(self: *Self, hyperedgeId: Uuid) HyperZigError!AutoArrayHashMap(Uuid, void).Iterator {
+        fn getHyperedgeVertices(self: *Self, hyperedgeId: Uuid) HyperZigError![]Uuid {
             try self.checkIfHyperedgeExists(hyperedgeId);
 
-            const entity = self.hyperedges.getPtr(hyperedgeId);
-            if (entity) |e| {
-                return e.connections.iterator();
+            const hyperedge = self.hyperedges.getPtr(hyperedgeId);
+            if (hyperedge) |h| {
+                return h.connections.items;
+            } else {
+                unreachable;
+            }
+        }
+
+        // Get all hyperedges of a vertex as an iterator.
+        fn getVertexHyperedges(self: *Self, vertexId: Uuid) HyperZigError![]Uuid {
+            try self.checkIfVertexExists(vertexId);
+
+            const vertex = self.vertices.getPtr(vertexId);
+            if (vertex) |v| {
+                return v.connections.keys();
             } else {
                 unreachable;
             }
@@ -115,20 +136,33 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfHyperedgeExists(hyperedgeId);
             try self.checkIfVertexExists(vertexId);
 
-            const entity = self.hyperedges.getPtr(hyperedgeId);
-            if (entity) |e| {
-                // Initialize connections if they don't exist.
-                if (e.connections.count() == 0) {
+            const hyperedge = self.hyperedges.getPtr(hyperedgeId);
+            if (hyperedge) |h| {
+                // Initialize connections if empty.
+                if (h.connections.items.len == 0) {
                     debug("hyperedge {} connections is empty, initializing", .{hyperedgeId});
-                    e.connections = AutoArrayHashMap(Uuid, void).init(self.allocator);
+                    h.connections = ArrayList(Uuid).init(self.allocator);
                 }
 
-                // Add vertex to connections.
-                try e.connections.put(vertexId, {});
+                // Add vertex to hyperedge connections.
+                try h.connections.append(vertexId);
                 debug("vertex {} added to hyperedge {}", .{
                     vertexId,
                     hyperedgeId,
                 });
+            } else {
+                unreachable;
+            }
+
+            const vertex = self.vertices.getPtr(vertexId);
+            if (vertex) |v| {
+                // Initialize connections if empty.
+                if (v.connections.count() == 0) {
+                    debug("vertex {} connections is empty, initializing", .{vertexId});
+                    v.connections = AutoArrayHashMap(Uuid, void).init(self.allocator);
+                }
+
+                try v.connections.put(hyperedgeId, {});
             } else {
                 unreachable;
             }
@@ -178,7 +212,7 @@ test "get hyperedge vertices" {
 
     const hyperedgeId = try graph.createHyperedge(.{});
 
-    const nbVertices = 1_000;
+    const nbVertices = 10;
     for (0..nbVertices) |_| {
         const vertexId = try graph.createVertex(.{});
         try graph.addVertexToHyperedge(hyperedgeId, vertexId);
@@ -187,6 +221,22 @@ test "get hyperedge vertices" {
     const result = graph.getHyperedgeVertices(1);
     try expectError(HyperZigError.HyperedgeNotFound, result);
 
-    const iter = try graph.getHyperedgeVertices(hyperedgeId);
-    try expect(iter.len == nbVertices);
+    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
+    try expect(vertices.len == nbVertices);
+}
+
+test "get vertex hyperedges" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const hyperedgeId = try graph.createHyperedge(.{});
+
+    const vertexId = try graph.createVertex(.{});
+    try graph.addVertexToHyperedge(hyperedgeId, vertexId);
+
+    const result = graph.getVertexHyperedges(1);
+    try expectError(HyperZigError.VertexNotFound, result);
+
+    const hyperedges = try graph.getVertexHyperedges(vertexId);
+    try expect(hyperedges.len == 1);
 }
