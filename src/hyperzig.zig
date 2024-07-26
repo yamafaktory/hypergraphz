@@ -222,9 +222,36 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 }
             }
         }
+
+        /// Delete a vertex from a hyperedge.
+        fn deleteVertexFromHyperedge(self: *Self, hyperedgeId: Uuid, vertexId: Uuid) HyperZigError!void {
+            try self.checkIfHyperedgeExists(hyperedgeId);
+            try self.checkIfVertexExists(vertexId);
+
+            const hyperedge = self.hyperedges.getPtr(hyperedgeId);
+            if (hyperedge) |h| {
+                const index = std.mem.indexOf(Uuid, h.connections.items, &.{vertexId});
+                if (index) |i| {
+                    const oldId = h.connections.orderedRemove(i);
+                    assert(oldId == vertexId);
+
+                    const vertex = self.vertices.getPtr(vertexId);
+                    if (vertex) |v| {
+                        const removed = v.connections.orderedRemove(hyperedgeId);
+                        assert(removed);
+                    } else {
+                        unreachable;
+                    }
+                    debug("vertice {} deleted from hyperedge {}", .{ vertexId, hyperedgeId });
+                } else {
+                    unreachable;
+                }
+            } else {
+                unreachable;
+            }
+        }
     };
 }
-
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 
@@ -331,4 +358,21 @@ test "get vertex hyperedges" {
 
     const hyperedges = try graph.getVertexHyperedges(vertexId);
     try expect(hyperedges.len == 1);
+}
+
+test "delete vertex from hyperedge" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const hyperedgeId = try graph.createHyperedge(.{});
+
+    const vertexId = try graph.createVertex(.{});
+    try graph.appendVertexToHyperedge(hyperedgeId, vertexId);
+
+    try graph.deleteVertexFromHyperedge(hyperedgeId, vertexId);
+    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
+    try expect(vertices.len == 0);
+
+    const hyperedges = try graph.getVertexHyperedges(vertexId);
+    try expect(hyperedges.len == 0);
 }
