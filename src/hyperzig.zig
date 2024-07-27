@@ -12,9 +12,7 @@ const debug = std.log.debug;
 
 /// HyperZig errors.
 pub const HyperZigError = (error{
-    HyperedgeAlreadyExists,
     HyperedgeNotFound,
-    VertexAlreadyExists,
     VertexNotFound,
 } || Allocator.Error);
 
@@ -116,6 +114,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             return id;
         }
 
+        /// Get a hyperedge.
         fn getHyperedge(self: *Self, id: Uuid) HyperZigError!H {
             try self.checkIfHyperedgeExists(id);
 
@@ -124,6 +123,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             return hyperedge.data;
         }
 
+        /// Get a vertex.
         fn getVertex(self: *Self, id: Uuid) HyperZigError!V {
             try self.checkIfVertexExists(id);
 
@@ -287,6 +287,32 @@ fn scaffold() HyperZigError!HyperZig(Hyperedge, Vertex) {
     ).init(std.testing.allocator);
 
     return graph;
+}
+
+test "create and get hyperedge" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const hyperedgeId = try graph.createHyperedge(.{});
+
+    const result = graph.getHyperedge(1);
+    try expectError(HyperZigError.HyperedgeNotFound, result);
+
+    const hyperedge = try graph.getHyperedge(hyperedgeId);
+    try expect(@TypeOf(hyperedge) == Hyperedge);
+}
+
+test "create and get vertex" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const vertexId = try graph.createVertex(.{});
+
+    const result = graph.getVertex(1);
+    try expectError(HyperZigError.VertexNotFound, result);
+
+    const vertex = try graph.getVertex(vertexId);
+    try expect(@TypeOf(vertex) == Vertex);
 }
 
 test "add vertex to hyperedge" {
