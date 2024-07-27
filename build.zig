@@ -1,4 +1,5 @@
 const std = @import("std");
+const hyperzigPath = "src/hyperzig.zig";
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -17,7 +18,7 @@ pub fn build(b: *std.Build) void {
 
     // Export as module to be available via @import("hyperzig").
     _ = b.addModule("hyperzig", .{
-        .root_source_file = b.path("src/hyperzig.zig"),
+        .root_source_file = b.path(hyperzigPath),
         .target = target,
         .optimize = optimize,
     });
@@ -25,7 +26,7 @@ pub fn build(b: *std.Build) void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/hyperzig.zig"),
+        .root_source_file = b.path(hyperzigPath),
         .target = target,
         .optimize = optimize,
         .filter = b.option([]const u8, "filter", "Filter strings for tests"),
