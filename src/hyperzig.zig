@@ -1,4 +1,7 @@
-//! HyperZig is a hypergraph implementation in Zig.
+//! HyperZig is a directed hypergraph implementation in Zig.
+//!
+//! Each hyperedge can contain one (unary) or multiple vertices.
+//! Each hyperedge can contain vertices directed to themselves one or more times.
 
 const std = @import("std");
 const uuid = @import("uuid");
@@ -14,6 +17,7 @@ const debug = std.log.debug;
 pub const HyperZigError = (error{
     HyperedgeNotFound,
     VertexNotFound,
+    IndexOutOfBounds,
 } || Allocator.Error);
 
 /// Create a hypergraph with hyperedges and vertices as comptime types.
@@ -253,6 +257,9 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(vertexId);
 
             const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            if (index > hyperedge.connections.items.len) {
+                return HyperZigError.IndexOutOfBounds;
+            }
             self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Insert vertex into hyperedge connections at given index.
@@ -341,6 +348,9 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             }
 
             const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            if (index > hyperedge.connections.items.len) {
+                return HyperZigError.IndexOutOfBounds;
+            }
             self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Prepend vertices to hyperedge connections.
@@ -487,6 +497,9 @@ test "insert vertex into hyperedge" {
     const resultV = graph.insertVertexIntoHyperedge(hyperedgeId, 1, 0);
     try expectError(HyperZigError.VertexNotFound, resultV);
 
+    const resultI = graph.insertVertexIntoHyperedge(hyperedgeId, firstVertexId, 10);
+    try expectError(HyperZigError.IndexOutOfBounds, resultI);
+
     try graph.insertVertexIntoHyperedge(hyperedgeId, firstVertexId, 0);
     try graph.insertVertexIntoHyperedge(hyperedgeId, secondVertexId, 0);
     const vertices = try graph.getHyperedgeVertices(hyperedgeId);
@@ -607,6 +620,9 @@ test "insert vertices into hyperedge" {
 
     const resultH = graph.insertVerticesIntoHyperedge(1, ids, 0);
     try expectError(HyperZigError.HyperedgeNotFound, resultH);
+
+    const resultI = graph.insertVerticesIntoHyperedge(hyperedgeId, ids, 10);
+    try expectError(HyperZigError.IndexOutOfBounds, resultI);
 
     const empty: []Uuid = &.{};
     const resultV = try graph.insertVerticesIntoHyperedge(hyperedgeId, empty, 0);
