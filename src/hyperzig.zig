@@ -118,6 +118,16 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             return id;
         }
 
+        /// Count the number of hyperedges.
+        fn countHyperedges(self: *Self) usize {
+            return self.hyperedges.count();
+        }
+
+        /// Count the number of vertices.
+        fn countVertices(self: *Self) usize {
+            return self.vertices.count();
+        }
+
         /// Check if an hyperedge exists.
         fn checkIfHyperedgeExists(self: *Self, id: Uuid) HyperZigError!void {
             if (!self.hyperedges.contains(id)) {
@@ -701,6 +711,26 @@ test "get vertex hyperedges" {
 
     const hyperedges = try graph.getVertexHyperedges(vertex_id);
     try expect(hyperedges.len == 1);
+}
+
+test "count hyperedges" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const hyperedge_id = try graph.createHyperedge(.{});
+    try expect(graph.countHyperedges() == 1);
+    try graph.deleteHyperedge(hyperedge_id, false);
+    try expect(graph.countHyperedges() == 0);
+}
+
+test "count vertices" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const vertex_id = try graph.createVertex(.{});
+    try expect(graph.countVertices() == 1);
+    try graph.deleteVertex(vertex_id);
+    try expect(graph.countVertices() == 0);
 }
 
 test "delete vertex from hyperedge" {
