@@ -425,6 +425,32 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             assert(removed);
             debug("vertice {} deleted from hyperedge {}", .{ vertex_id, hyperedge_id });
         }
+
+        /// Delete a vertex from a hyperedge at a given index.
+        fn deleteVertexByIndexFromHyperedge(self: *Self, hyperedge_id: Uuid, index: usize) HyperZigError!void {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
+            if (index > hyperedge.connections.items.len) {
+                return HyperZigError.IndexOutOfBounds;
+            }
+
+            const vertex_id = hyperedge.connections.orderedRemove(index);
+            const vertex = self.vertices.getPtr(vertex_id).?;
+
+            // Check that if the same vertex appears again in this hyperedge.
+            // If not, we can remove the hyperedge from the vertex connections.
+            for (hyperedge.connections.items) |v| {
+                if (v == vertex_id) {
+                    break;
+                }
+            } else {
+                const removed = vertex.connections.orderedRemove(hyperedge_id);
+                assert(removed);
+            }
+
+            debug("vertice {} at index {} deleted from hyperedge {}", .{ vertex_id, index, hyperedge_id });
+        }
     };
 }
 
@@ -771,4 +797,48 @@ test "delete vertex" {
     const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == 0);
     try expectError(HyperZigError.VertexNotFound, graph.getVertex(vertex_id));
+}
+
+test "delete vertex by index from hyperedge" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const hyperedge_id = try graph.createHyperedge(.{});
+
+    // Create 10 vertices and store their ids.
+    // Last two vertices are duplicated.
+    const nb_vertices = 10;
+    var arr = ArrayList(Uuid).init(std.testing.allocator);
+    defer arr.deinit();
+    for (0..nb_vertices, 0..) |_, i| {
+        if (i == nb_vertices - 1) {
+            try arr.append(arr.items[arr.items.len - 1]);
+            continue;
+        }
+        const id = try graph.createVertex(.{});
+        try arr.append(id);
+    }
+    const ids = arr.items;
+
+    // Append vertices to the hyperedge.
+    try graph.appendVerticesToHyperedge(hyperedge_id, ids);
+
+    try expectError(HyperZigError.HyperedgeNotFound, graph.deleteVertexByIndexFromHyperedge(1, 0));
+
+    // Delete the first vertex.
+    // The hyperedge should be dropped from the connections.
+    try graph.deleteVertexByIndexFromHyperedge(hyperedge_id, 0);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
+    try expect(vertices.len == nb_vertices - 1);
+    for (ids[1..], 0..) |id, i| {
+        try expect(vertices[i] == id);
+    }
+    const first_vertex_hyperedges = try graph.getVertexHyperedges(ids[0]);
+    try expect(first_vertex_hyperedges.len == 0);
+
+    // Delete the last vertex.
+    // The hyperedge should not be dropped from the connections.
+    try graph.deleteVertexByIndexFromHyperedge(hyperedge_id, nb_vertices - 2);
+    const last_vertex_hyperedges = try graph.getVertexHyperedges(ids[nb_vertices - 3]);
+    try expect(last_vertex_hyperedges.len == 1);
 }
