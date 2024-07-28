@@ -164,6 +164,20 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             return hyperedge.data;
         }
 
+        /// Update a hyperedge.
+        fn updateHyperedge(self: *Self, id: Uuid, hyperedge: H) HyperZigError!void {
+            try self.checkIfHyperedgeExists(id);
+
+            self.hyperedges.getPtr(id).?.data = hyperedge;
+        }
+
+        /// Update a vertex.
+        fn updateVertex(self: *Self, id: Uuid, vertex: V) HyperZigError!void {
+            try self.checkIfVertexExists(id);
+
+            self.vertices.getPtr(id).?.data = vertex;
+        }
+
         /// Get the indegree of a vertex.
         /// Note that a vertex can be directed to itself multiple times.
         /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
@@ -526,8 +540,8 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 const expect = std.testing.expect;
 const expectError = std.testing.expectError;
 
-const Hyperedge = struct {};
-const Vertex = struct {};
+const Hyperedge = struct { meow: bool = false };
+const Vertex = struct { purr: bool = false };
 
 fn scaffold() HyperZigError!HyperZig(Hyperedge, Vertex) {
     std.testing.log_level = .debug;
@@ -949,6 +963,8 @@ test "get vertex indegree" {
     const h_c = try graph.createHyperedge(.{});
     try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
 
+    try expectError(HyperZigError.VertexNotFound, graph.getVertexIndegree(1));
+
     try expect(try graph.getVertexIndegree(v_a) == 2);
     try expect(try graph.getVertexIndegree(v_b) == 2);
     try expect(try graph.getVertexIndegree(v_c) == 3);
@@ -973,9 +989,39 @@ test "get vertex outdegree" {
     const h_c = try graph.createHyperedge(.{});
     try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
 
+    try expectError(HyperZigError.VertexNotFound, graph.getVertexOutdegree(1));
+
     try expect(try graph.getVertexOutdegree(v_a) == 2);
     try expect(try graph.getVertexOutdegree(v_b) == 2);
     try expect(try graph.getVertexOutdegree(v_c) == 3);
     try expect(try graph.getVertexOutdegree(v_d) == 2);
     try expect(try graph.getVertexOutdegree(v_e) == 3);
+}
+
+test "update hyperedge" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const hyperedge_id = try graph.createHyperedge(.{});
+
+    try expectError(HyperZigError.HyperedgeNotFound, graph.updateHyperedge(1, .{}));
+
+    try graph.updateHyperedge(hyperedge_id, .{ .meow = true });
+    const hyperedge = try graph.getHyperedge(hyperedge_id);
+    try expect(@TypeOf(hyperedge) == Hyperedge);
+    try expect(hyperedge.meow);
+}
+
+test "update vertex" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const vertex_id = try graph.createVertex(.{});
+
+    try expectError(HyperZigError.VertexNotFound, graph.updateVertex(1, .{}));
+
+    try graph.updateVertex(vertex_id, .{ .purr = true });
+    const vertex = try graph.getVertex(vertex_id);
+    try expect(@TypeOf(vertex) == Vertex);
+    try expect(vertex.purr);
 }
