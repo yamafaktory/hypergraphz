@@ -64,14 +64,14 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Deinit the HyperZig instance.
         fn deinit(self: *Self) void {
             // Deinit hyperedge connections.
-            var hIter = self.hyperedges.iterator();
-            while (hIter.next()) |kv| {
+            var h_iter = self.hyperedges.iterator();
+            while (h_iter.next()) |kv| {
                 kv.value_ptr.connections.deinit();
             }
 
             // Deinit vertex connections.
-            var vIter = self.vertices.iterator();
-            while (vIter.next()) |kv| {
+            var v_iter = self.vertices.iterator();
+            while (v_iter.next()) |kv| {
                 kv.value_ptr.connections.deinit();
             }
 
@@ -155,13 +155,13 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a hyperedge.
-        fn deleteHyperedge(self: *Self, id: Uuid, dropVertices: bool) HyperZigError!void {
+        fn deleteHyperedge(self: *Self, id: Uuid, drop_vertices: bool) HyperZigError!void {
             try self.checkIfHyperedgeExists(id);
 
             const hyperedge = self.hyperedges.getPtr(id).?;
             const vertices = hyperedge.connections.items;
 
-            if (dropVertices) {
+            if (drop_vertices) {
                 // Delete vertices.
                 for (vertices) |v| {
                     const vertex = self.vertices.getPtr(v).?;
@@ -198,10 +198,18 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             for (hyperedges) |h| {
                 const hyperedge = self.hyperedges.getPtr(h).?;
                 // Delete the vertex from the hyperedge connections.
-                // TODO: this is incorrect since the same vertex can appear multiple times in a hyperedge.
-                const index = std.mem.indexOf(Uuid, hyperedge.connections.items, &.{id}).?;
-                const oldId = hyperedge.connections.orderedRemove(index);
-                assert(oldId == id);
+                // The same vertex can appear multiple times within a hyperedge.
+                // Create a temporary list to store the connections without the vertex.
+                var tmp = ArrayList(Uuid).init(self.allocator);
+                for (hyperedge.connections.items) |v| {
+                    if (v != id) {
+                        try tmp.append(v);
+                    }
+                }
+                // Swap the temporary list with the hyperedge connections.
+                std.mem.swap(ArrayList(Uuid), &hyperedge.connections, &tmp);
+                // Release the temporary list.
+                tmp.deinit();
             }
 
             // Release memory.
@@ -215,198 +223,207 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Get all vertices of a hyperedge as a slice.
-        fn getHyperedgeVertices(self: *Self, hyperedgeId: Uuid) HyperZigError![]Uuid {
-            try self.checkIfHyperedgeExists(hyperedgeId);
+        fn getHyperedgeVertices(self: *Self, hyperedge_id: Uuid) HyperZigError![]Uuid {
+            try self.checkIfHyperedgeExists(hyperedge_id);
 
-            const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
 
             return hyperedge.connections.items;
         }
 
         /// Get all hyperedges of a vertex as a slice.
-        fn getVertexHyperedges(self: *Self, vertexId: Uuid) HyperZigError![]Uuid {
-            try self.checkIfVertexExists(vertexId);
+        fn getVertexHyperedges(self: *Self, vertex_id: Uuid) HyperZigError![]Uuid {
+            try self.checkIfVertexExists(vertex_id);
 
-            const vertex = self.vertices.getPtr(vertexId).?;
+            const vertex = self.vertices.getPtr(vertex_id).?;
 
             return vertex.connections.keys();
         }
 
         /// Append a vertex to a hyperedge.
-        fn appendVertexToHyperedge(self: *Self, hyperedgeId: Uuid, vertexId: Uuid) HyperZigError!void {
-            try self.checkIfHyperedgeExists(hyperedgeId);
-            try self.checkIfVertexExists(vertexId);
+        fn appendVertexToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+            try self.checkIfVertexExists(vertex_id);
 
-            const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Append vertex to hyperedge connections.
-            try hyperedge.connections.append(vertexId);
+            try hyperedge.connections.append(vertex_id);
 
-            const vertex = self.vertices.getPtr(vertexId).?;
+            const vertex = self.vertices.getPtr(vertex_id).?;
             self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-            try vertex.connections.put(hyperedgeId, {});
+            try vertex.connections.put(hyperedge_id, {});
 
             debug("vertex {} appended to hyperedge {}", .{
-                vertexId,
-                hyperedgeId,
+                vertex_id,
+                hyperedge_id,
             });
         }
 
         /// Prepend a vertex to a hyperedge.
-        fn prependVertexToHyperedge(self: *Self, hyperedgeId: Uuid, vertexId: Uuid) HyperZigError!void {
-            try self.checkIfHyperedgeExists(hyperedgeId);
-            try self.checkIfVertexExists(vertexId);
+        fn prependVertexToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+            try self.checkIfVertexExists(vertex_id);
 
-            const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Prepend vertex to hyperedge connections.
-            try hyperedge.connections.insertSlice(0, &.{vertexId});
+            try hyperedge.connections.insertSlice(0, &.{vertex_id});
 
-            const vertex = self.vertices.getPtr(vertexId).?;
+            const vertex = self.vertices.getPtr(vertex_id).?;
             self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-            try vertex.connections.put(hyperedgeId, {});
+            try vertex.connections.put(hyperedge_id, {});
 
             debug("vertex {} prepended to hyperedge {}", .{
-                vertexId,
-                hyperedgeId,
+                vertex_id,
+                hyperedge_id,
             });
         }
 
         /// Insert a vertex into a hyperedge at a given index.
-        fn insertVertexIntoHyperedge(self: *Self, hyperedgeId: Uuid, vertexId: Uuid, index: usize) HyperZigError!void {
-            try self.checkIfHyperedgeExists(hyperedgeId);
-            try self.checkIfVertexExists(vertexId);
+        fn insertVertexIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid, index: usize) HyperZigError!void {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+            try self.checkIfVertexExists(vertex_id);
 
-            const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             if (index > hyperedge.connections.items.len) {
                 return HyperZigError.IndexOutOfBounds;
             }
             self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Insert vertex into hyperedge connections at given index.
-            try hyperedge.connections.insert(index, vertexId);
+            try hyperedge.connections.insert(index, vertex_id);
 
-            const vertex = self.vertices.getPtr(vertexId).?;
+            const vertex = self.vertices.getPtr(vertex_id).?;
             self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-            try vertex.connections.put(hyperedgeId, {});
+            try vertex.connections.put(hyperedge_id, {});
 
             debug("vertex {} inserted into hyperedge {} at index {}", .{
-                vertexId,
-                hyperedgeId,
+                vertex_id,
+                hyperedge_id,
                 index,
             });
         }
 
         /// Append vertices to a hyperedge.
-        fn appendVerticesToHyperedge(self: *Self, hyperedgeId: Uuid, vertexIds: []const Uuid) HyperZigError!void {
-            if (vertexIds.len == 0) {
-                debug("no vertices to append to hyperedge {}, skipping", .{hyperedgeId});
+        fn appendVerticesToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_ids: []const Uuid) HyperZigError!void {
+            if (vertex_ids.len == 0) {
+                debug("no vertices to append to hyperedge {}, skipping", .{hyperedge_id});
                 return;
             }
 
-            try self.checkIfHyperedgeExists(hyperedgeId);
-            for (vertexIds) |v| {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+            for (vertex_ids) |v| {
                 try self.checkIfVertexExists(v);
             }
 
-            const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Append vertices to hyperedge connections.
-            try hyperedge.connections.appendSlice(vertexIds);
+            try hyperedge.connections.appendSlice(vertex_ids);
 
-            for (vertexIds) |id| {
+            for (vertex_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
                 self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-                try vertex.connections.put(hyperedgeId, {});
+                try vertex.connections.put(hyperedge_id, {});
             }
 
-            debug("vertices appended to hyperedge {}", .{hyperedgeId});
+            debug("vertices appended to hyperedge {}", .{hyperedge_id});
         }
 
         /// Prepend vertices to a hyperedge.
-        fn prependVerticesToHyperedge(self: *Self, hyperedgeId: Uuid, vertexIds: []const Uuid) HyperZigError!void {
-            if (vertexIds.len == 0) {
-                debug("no vertices to prepend to hyperedge {}, skipping", .{hyperedgeId});
+        fn prependVerticesToHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid) HyperZigError!void {
+            if (vertices_ids.len == 0) {
+                debug("no vertices to prepend to hyperedge {}, skipping", .{hyperedge_id});
                 return;
             }
 
-            try self.checkIfHyperedgeExists(hyperedgeId);
-            for (vertexIds) |v| {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+            for (vertices_ids) |v| {
                 try self.checkIfVertexExists(v);
             }
 
-            const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Prepend vertices to hyperedge connections.
-            try hyperedge.connections.insertSlice(0, vertexIds);
+            try hyperedge.connections.insertSlice(0, vertices_ids);
 
-            for (vertexIds) |id| {
+            for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
                 self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-                try vertex.connections.put(hyperedgeId, {});
+                try vertex.connections.put(hyperedge_id, {});
             }
 
-            debug("vertices prepended to hyperedge {}", .{hyperedgeId});
+            debug("vertices prepended to hyperedge {}", .{hyperedge_id});
         }
 
         /// Insert vertices into a hyperedge at a given index.
-        fn insertVerticesIntoHyperedge(self: *Self, hyperedgeId: Uuid, vertexIds: []const Uuid, index: usize) HyperZigError!void {
-            if (vertexIds.len == 0) {
-                debug("no vertices to insert into hyperedge {}, skipping", .{hyperedgeId});
+        fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid, index: usize) HyperZigError!void {
+            if (vertices_ids.len == 0) {
+                debug("no vertices to insert into hyperedge {}, skipping", .{hyperedge_id});
                 return;
             }
 
-            try self.checkIfHyperedgeExists(hyperedgeId);
-            for (vertexIds) |v| {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+            for (vertices_ids) |v| {
                 try self.checkIfVertexExists(v);
             }
 
-            const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             if (index > hyperedge.connections.items.len) {
                 return HyperZigError.IndexOutOfBounds;
             }
             self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Prepend vertices to hyperedge connections.
-            try hyperedge.connections.insertSlice(index, vertexIds);
+            try hyperedge.connections.insertSlice(index, vertices_ids);
 
-            for (vertexIds) |id| {
+            for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
                 self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-                try vertex.connections.put(hyperedgeId, {});
+                try vertex.connections.put(hyperedge_id, {});
             }
 
-            debug("vertices inserted into hyperedge {} at index {}", .{ hyperedgeId, index });
+            debug("vertices inserted into hyperedge {} at index {}", .{ hyperedge_id, index });
         }
 
         /// Delete a vertex from a hyperedge.
-        fn deleteVertexFromHyperedge(self: *Self, hyperedgeId: Uuid, vertexId: Uuid) HyperZigError!void {
-            try self.checkIfHyperedgeExists(hyperedgeId);
-            try self.checkIfVertexExists(vertexId);
+        fn deleteVertexFromHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+            try self.checkIfVertexExists(vertex_id);
 
-            const hyperedge = self.hyperedges.getPtr(hyperedgeId).?;
-            // TODO: this is incorrect since the same vertex can appear multiple times in a hyperedge.
-            const index = std.mem.indexOf(Uuid, hyperedge.connections.items, &.{vertexId}).?;
-            const oldId = hyperedge.connections.orderedRemove(index);
-            assert(oldId == vertexId);
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
 
-            const vertex = self.vertices.getPtr(vertexId).?;
-            const removed = vertex.connections.orderedRemove(hyperedgeId);
+            // The same vertex can appear multiple times within a hyperedge.
+            // Create a temporary list to store the connections without the vertex.
+            var tmp = ArrayList(Uuid).init(self.allocator);
+            for (hyperedge.connections.items) |v| {
+                if (v != vertex_id) {
+                    try tmp.append(v);
+                }
+            }
+            // Swap the temporary list with the hyperedge connections.
+            std.mem.swap(ArrayList(Uuid), &hyperedge.connections, &tmp);
+            // Release the temporary list.
+            tmp.deinit();
+
+            const vertex = self.vertices.getPtr(vertex_id).?;
+            const removed = vertex.connections.orderedRemove(hyperedge_id);
             assert(removed);
-            debug("vertice {} deleted from hyperedge {}", .{ vertexId, hyperedgeId });
+            debug("vertice {} deleted from hyperedge {}", .{ vertex_id, hyperedge_id });
         }
     };
 }
@@ -432,11 +449,11 @@ test "create and get hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
+    const hyperedge_id = try graph.createHyperedge(.{});
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedge(1));
 
-    const hyperedge = try graph.getHyperedge(hyperedgeId);
+    const hyperedge = try graph.getHyperedge(hyperedge_id);
     try expect(@TypeOf(hyperedge) == Hyperedge);
 }
 
@@ -444,11 +461,11 @@ test "create and get vertex" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const vertexId = try graph.createVertex(.{});
+    const vertex_id = try graph.createVertex(.{});
 
     try expectError(HyperZigError.VertexNotFound, graph.getVertex(1));
 
-    const vertex = try graph.getVertex(vertexId);
+    const vertex = try graph.getVertex(vertex_id);
     try expect(@TypeOf(vertex) == Vertex);
 }
 
@@ -456,103 +473,103 @@ test "append vertex to hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
-    try expect(hyperedgeId != 0);
+    const hyperedge_id = try graph.createHyperedge(.{});
+    try expect(hyperedge_id != 0);
 
-    const firstVertexId = try graph.createVertex(.{});
-    const secondVertexId = try graph.createVertex(.{});
-    try expect(firstVertexId != 0);
+    const first_vertex_id = try graph.createVertex(.{});
+    const second_vertex_id = try graph.createVertex(.{});
+    try expect(first_vertex_id != 0);
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.appendVertexToHyperedge(1, 1));
 
-    try expectError(HyperZigError.VertexNotFound, graph.appendVertexToHyperedge(hyperedgeId, 1));
+    try expectError(HyperZigError.VertexNotFound, graph.appendVertexToHyperedge(hyperedge_id, 1));
 
-    try graph.appendVertexToHyperedge(hyperedgeId, firstVertexId);
-    try graph.appendVertexToHyperedge(hyperedgeId, secondVertexId);
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
+    try graph.appendVertexToHyperedge(hyperedge_id, first_vertex_id);
+    try graph.appendVertexToHyperedge(hyperedge_id, second_vertex_id);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == 2);
-    try expect(vertices[0] == firstVertexId);
-    try expect(vertices[1] == secondVertexId);
+    try expect(vertices[0] == first_vertex_id);
+    try expect(vertices[1] == second_vertex_id);
 }
 
 test "prepend vertex to hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
-    try expect(hyperedgeId != 0);
+    const hyperedge_id = try graph.createHyperedge(.{});
+    try expect(hyperedge_id != 0);
 
-    const firstVertexId = try graph.createVertex(.{});
-    const secondVertexId = try graph.createVertex(.{});
-    try expect(firstVertexId != 0);
+    const first_vertex_id = try graph.createVertex(.{});
+    const second_vertex_id = try graph.createVertex(.{});
+    try expect(first_vertex_id != 0);
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.prependVertexToHyperedge(1, 1));
 
-    try expectError(HyperZigError.VertexNotFound, graph.prependVertexToHyperedge(hyperedgeId, 1));
+    try expectError(HyperZigError.VertexNotFound, graph.prependVertexToHyperedge(hyperedge_id, 1));
 
-    try graph.prependVertexToHyperedge(hyperedgeId, firstVertexId);
-    try graph.prependVertexToHyperedge(hyperedgeId, secondVertexId);
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
+    try graph.prependVertexToHyperedge(hyperedge_id, first_vertex_id);
+    try graph.prependVertexToHyperedge(hyperedge_id, second_vertex_id);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == 2);
-    try expect(vertices[0] == secondVertexId);
-    try expect(vertices[1] == firstVertexId);
+    try expect(vertices[0] == second_vertex_id);
+    try expect(vertices[1] == first_vertex_id);
 }
 
 test "insert vertex into hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
-    try expect(hyperedgeId != 0);
+    const hyperedge_id = try graph.createHyperedge(.{});
+    try expect(hyperedge_id != 0);
 
-    const firstVertexId = try graph.createVertex(.{});
-    const secondVertexId = try graph.createVertex(.{});
-    try expect(firstVertexId != 0);
+    const first_vertex_id = try graph.createVertex(.{});
+    const second_vertex_id = try graph.createVertex(.{});
+    try expect(first_vertex_id != 0);
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.insertVertexIntoHyperedge(1, 1, 0));
 
-    try expectError(HyperZigError.VertexNotFound, graph.insertVertexIntoHyperedge(hyperedgeId, 1, 0));
+    try expectError(HyperZigError.VertexNotFound, graph.insertVertexIntoHyperedge(hyperedge_id, 1, 0));
 
-    try expectError(HyperZigError.IndexOutOfBounds, graph.insertVertexIntoHyperedge(hyperedgeId, firstVertexId, 10));
+    try expectError(HyperZigError.IndexOutOfBounds, graph.insertVertexIntoHyperedge(hyperedge_id, first_vertex_id, 10));
 
-    try graph.insertVertexIntoHyperedge(hyperedgeId, firstVertexId, 0);
-    try graph.insertVertexIntoHyperedge(hyperedgeId, secondVertexId, 0);
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
+    try graph.insertVertexIntoHyperedge(hyperedge_id, first_vertex_id, 0);
+    try graph.insertVertexIntoHyperedge(hyperedge_id, second_vertex_id, 0);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == 2);
-    try expect(vertices[0] == secondVertexId);
-    try expect(vertices[1] == firstVertexId);
+    try expect(vertices[0] == second_vertex_id);
+    try expect(vertices[1] == first_vertex_id);
 }
 
 test "get hyperedge vertices" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
+    const hyperedge_id = try graph.createHyperedge(.{});
 
-    const nbVertices = 10;
-    for (0..nbVertices) |_| {
-        const vertexId = try graph.createVertex(.{});
-        try graph.appendVertexToHyperedge(hyperedgeId, vertexId);
+    const nb_vertices = 10;
+    for (0..nb_vertices) |_| {
+        const vertex_id = try graph.createVertex(.{});
+        try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
     }
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedgeVertices(1));
 
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
-    try expect(vertices.len == nbVertices);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
+    try expect(vertices.len == nb_vertices);
 }
 
 test "append vertices to hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
-    try expect(hyperedgeId != 0);
+    const hyperedge_id = try graph.createHyperedge(.{});
+    try expect(hyperedge_id != 0);
 
     // Create 10 vertices and store their ids.
-    const nbVertices = 10;
+    const nb_vertices = 10;
     var arr = ArrayList(Uuid).init(std.testing.allocator);
     defer arr.deinit();
-    for (0..nbVertices) |_| {
+    for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
         try arr.append(id);
     }
@@ -560,20 +577,18 @@ test "append vertices to hyperedge" {
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.appendVerticesToHyperedge(1, ids));
 
-    const empty: []Uuid = &.{};
-    const resultV = try graph.appendVerticesToHyperedge(hyperedgeId, empty);
-    try expect(resultV == undefined);
+    try expect(try graph.appendVerticesToHyperedge(hyperedge_id, &.{}) == undefined);
 
     // Append first vertex, then the rest and check that appending works.
-    try graph.appendVertexToHyperedge(hyperedgeId, ids[0]);
-    try graph.appendVerticesToHyperedge(hyperedgeId, ids[1..nbVertices]);
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
-    try expect(vertices.len == nbVertices);
+    try graph.appendVertexToHyperedge(hyperedge_id, ids[0]);
+    try graph.appendVerticesToHyperedge(hyperedge_id, ids[1..nb_vertices]);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
+    try expect(vertices.len == nb_vertices);
     for (ids, 0..) |id, i| {
         try expect(vertices[i] == id);
         const hyperedges = try graph.getVertexHyperedges(id);
         try expect(hyperedges.len == 1);
-        try expect(hyperedges[0] == hyperedgeId);
+        try expect(hyperedges[0] == hyperedge_id);
     }
 }
 
@@ -581,14 +596,14 @@ test "prepend vertices to hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
-    try expect(hyperedgeId != 0);
+    const hyperedge_id = try graph.createHyperedge(.{});
+    try expect(hyperedge_id != 0);
 
     // Create 10 vertices and store their ids.
-    const nbVertices = 10;
+    const nb_vertices = 10;
     var arr = ArrayList(Uuid).init(std.testing.allocator);
     defer arr.deinit();
-    for (0..nbVertices) |_| {
+    for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
         try arr.append(id);
     }
@@ -596,20 +611,18 @@ test "prepend vertices to hyperedge" {
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.prependVerticesToHyperedge(1, ids));
 
-    const empty: []Uuid = &.{};
-    const resultV = try graph.prependVerticesToHyperedge(hyperedgeId, empty);
-    try expect(resultV == undefined);
+    try expect(try graph.prependVerticesToHyperedge(hyperedge_id, &.{}) == undefined);
 
     // Prepend the last vertex, then the rest and check that prepending works.
-    try graph.prependVertexToHyperedge(hyperedgeId, ids[nbVertices - 1]);
-    try graph.prependVerticesToHyperedge(hyperedgeId, ids[0 .. nbVertices - 1]);
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
-    try expect(vertices.len == nbVertices);
+    try graph.prependVertexToHyperedge(hyperedge_id, ids[nb_vertices - 1]);
+    try graph.prependVerticesToHyperedge(hyperedge_id, ids[0 .. nb_vertices - 1]);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
+    try expect(vertices.len == nb_vertices);
     for (ids, 0..) |id, i| {
         try expect(vertices[i] == id);
         const hyperedges = try graph.getVertexHyperedges(id);
         try expect(hyperedges.len == 1);
-        try expect(hyperedges[0] == hyperedgeId);
+        try expect(hyperedges[0] == hyperedge_id);
     }
 }
 
@@ -617,14 +630,14 @@ test "insert vertices into hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
-    try expect(hyperedgeId != 0);
+    const hyperedge_id = try graph.createHyperedge(.{});
+    try expect(hyperedge_id != 0);
 
     // Create 10 vertices and store their ids.
-    const nbVertices = 10;
+    const nb_vertices = 10;
     var arr = ArrayList(Uuid).init(std.testing.allocator);
     defer arr.deinit();
-    for (0..nbVertices) |_| {
+    for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
         try arr.append(id);
     }
@@ -632,22 +645,20 @@ test "insert vertices into hyperedge" {
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.insertVerticesIntoHyperedge(1, ids, 0));
 
-    try expectError(HyperZigError.IndexOutOfBounds, graph.insertVerticesIntoHyperedge(hyperedgeId, ids, 10));
+    try expectError(HyperZigError.IndexOutOfBounds, graph.insertVerticesIntoHyperedge(hyperedge_id, ids, 10));
 
-    const empty: []Uuid = &.{};
-    const resultV = try graph.insertVerticesIntoHyperedge(hyperedgeId, empty, 0);
-    try expect(resultV == undefined);
+    try expect(try graph.insertVerticesIntoHyperedge(hyperedge_id, &.{}, 0) == undefined);
 
     // Insert the first vertex, then the rest and check that inserting works.
-    try graph.insertVertexIntoHyperedge(hyperedgeId, ids[0], 0);
-    try graph.insertVerticesIntoHyperedge(hyperedgeId, ids[1..nbVertices], 1);
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
-    try expect(vertices.len == nbVertices);
+    try graph.insertVertexIntoHyperedge(hyperedge_id, ids[0], 0);
+    try graph.insertVerticesIntoHyperedge(hyperedge_id, ids[1..nb_vertices], 1);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
+    try expect(vertices.len == nb_vertices);
     for (ids, 0..) |id, i| {
         try expect(vertices[i] == id);
         const hyperedges = try graph.getVertexHyperedges(id);
         try expect(hyperedges.len == 1);
-        try expect(hyperedges[0] == hyperedgeId);
+        try expect(hyperedges[0] == hyperedge_id);
     }
 }
 
@@ -655,14 +666,14 @@ test "get vertex hyperedges" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
+    const hyperedge_id = try graph.createHyperedge(.{});
 
-    const vertexId = try graph.createVertex(.{});
-    try graph.appendVertexToHyperedge(hyperedgeId, vertexId);
+    const vertex_id = try graph.createVertex(.{});
+    try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
 
     try expectError(HyperZigError.VertexNotFound, graph.getVertexHyperedges(1));
 
-    const hyperedges = try graph.getVertexHyperedges(vertexId);
+    const hyperedges = try graph.getVertexHyperedges(vertex_id);
     try expect(hyperedges.len == 1);
 }
 
@@ -670,16 +681,23 @@ test "delete vertex from hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
+    const hyperedge_id = try graph.createHyperedge(.{});
 
-    const vertexId = try graph.createVertex(.{});
-    try graph.appendVertexToHyperedge(hyperedgeId, vertexId);
+    const vertex_id = try graph.createVertex(.{});
 
-    try graph.deleteVertexFromHyperedge(hyperedgeId, vertexId);
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
+    // Insert the vertex twice.
+    try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
+    try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
+
+    try expectError(HyperZigError.HyperedgeNotFound, graph.deleteVertexFromHyperedge(1, vertex_id));
+
+    try expectError(HyperZigError.VertexNotFound, graph.deleteVertexFromHyperedge(hyperedge_id, 1));
+
+    try graph.deleteVertexFromHyperedge(hyperedge_id, vertex_id);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == 0);
 
-    const hyperedges = try graph.getVertexHyperedges(vertexId);
+    const hyperedges = try graph.getVertexHyperedges(vertex_id);
     try expect(hyperedges.len == 0);
 }
 
@@ -687,65 +705,70 @@ test "delete hyperedge only" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
+    const hyperedge_id = try graph.createHyperedge(.{});
 
     // Create 10 vertices and store their ids.
-    const nbVertices = 10;
+    const nb_vertices = 10;
     var arr = ArrayList(Uuid).init(std.testing.allocator);
     defer arr.deinit();
-    for (0..nbVertices) |_| {
+    for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
         try arr.append(id);
     }
     const ids = arr.items;
 
-    try graph.appendVerticesToHyperedge(hyperedgeId, ids);
+    try graph.appendVerticesToHyperedge(hyperedge_id, ids);
 
-    try graph.deleteHyperedge(hyperedgeId, false);
+    try graph.deleteHyperedge(hyperedge_id, false);
     for (ids) |id| {
         const hyperedges = try graph.getVertexHyperedges(id);
         try expect(hyperedges.len == 0);
     }
 
-    try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedge(hyperedgeId));
+    try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedge(hyperedge_id));
 }
 
 test "delete hyperedge and vertices" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
+    const hyperedge_id = try graph.createHyperedge(.{});
 
     // Create 10 vertices and store their ids.
-    const nbVertices = 10;
+    const nb_vertices = 10;
     var arr = ArrayList(Uuid).init(std.testing.allocator);
     defer arr.deinit();
-    for (0..nbVertices) |_| {
+    for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
         try arr.append(id);
     }
     const ids = arr.items;
 
-    try graph.appendVerticesToHyperedge(hyperedgeId, ids);
+    try graph.appendVerticesToHyperedge(hyperedge_id, ids);
 
-    try graph.deleteHyperedge(hyperedgeId, true);
+    try graph.deleteHyperedge(hyperedge_id, true);
     for (ids) |id| {
         try expectError(HyperZigError.VertexNotFound, graph.getVertex(id));
     }
 
-    try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedge(hyperedgeId));
+    try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedge(hyperedge_id));
 }
 
 test "delete vertex" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const hyperedgeId = try graph.createHyperedge(.{});
-    const vertexId = try graph.createVertex(.{});
+    const hyperedge_id = try graph.createHyperedge(.{});
+    const vertex_id = try graph.createVertex(.{});
 
-    try graph.appendVertexToHyperedge(hyperedgeId, vertexId);
-    try graph.deleteVertex(vertexId);
-    const vertices = try graph.getHyperedgeVertices(hyperedgeId);
+    // Insert the vertex twice.
+    try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
+    try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
+
+    try expectError(HyperZigError.VertexNotFound, graph.deleteVertex(1));
+
+    try graph.deleteVertex(vertex_id);
+    const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == 0);
-    try expectError(HyperZigError.VertexNotFound, graph.getVertex(vertexId));
+    try expectError(HyperZigError.VertexNotFound, graph.getVertex(vertex_id));
 }
