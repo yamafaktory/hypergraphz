@@ -1,5 +1,5 @@
 //! HyperZig is a directed hypergraph implementation in Zig.
-//!
+//! https://en.wikipedia.org/wiki/Hypergraph
 //! Each hyperedge can contain one (unary) or multiple vertices.
 //! Each hyperedge can contain vertices directed to themselves one or more times.
 
@@ -64,14 +64,14 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Deinit the HyperZig instance.
         fn deinit(self: *Self) void {
             // Deinit hyperedge connections.
-            var h_iter = self.hyperedges.iterator();
-            while (h_iter.next()) |kv| {
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
                 kv.value_ptr.connections.deinit();
             }
 
             // Deinit vertex connections.
-            var v_iter = self.vertices.iterator();
-            while (v_iter.next()) |kv| {
+            var v_it = self.vertices.iterator();
+            while (v_it.next()) |kv| {
                 kv.value_ptr.connections.deinit();
             }
 
@@ -162,6 +162,65 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             const hyperedge = self.vertices.get(id).?;
 
             return hyperedge.data;
+        }
+
+        /// Get the indegree of a vertex.
+        /// Note that a vertex can be directed to itself multiple times.
+        /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
+        fn getVertexIndegree(self: *Self, id: Uuid) HyperZigError!usize {
+            try self.checkIfVertexExists(id);
+
+            const vertex = self.vertices.get(id).?;
+            var indegree: usize = 0;
+            var it = vertex.connections.iterator();
+            while (it.next()) |kv| {
+                const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
+                if (hyperedge.connections.items.len > 0) {
+                    // Act as a window over the hyperedge connections.
+                    // Skip the first element since it has an indegree of 0.
+                    for (hyperedge.connections.items, 0..) |v, i| {
+                        if (i == 0) {
+                            continue;
+                        }
+
+                        if (v == id) {
+                            indegree += 1;
+                        }
+                    }
+                }
+            }
+
+            return indegree;
+        }
+
+        /// Get the indegree of a vertex.
+        /// Note that a vertex can be directed to itself multiple times.
+        /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
+        fn getVertexOutdegree(self: *Self, id: Uuid) HyperZigError!usize {
+            try self.checkIfVertexExists(id);
+
+            const vertex = self.vertices.get(id).?;
+            var outdegree: usize = 0;
+            var it = vertex.connections.iterator();
+            while (it.next()) |kv| {
+                const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
+                if (hyperedge.connections.items.len > 0) {
+                    // Act as a window over the hyperedge connections.
+                    // Skip the last element since it has an outdegree of 0.
+                    const last = hyperedge.connections.items.len - 1;
+                    for (hyperedge.connections.items, 0..) |v, i| {
+                        if (i == last) {
+                            break;
+                        }
+
+                        if (v == id) {
+                            outdegree += 1;
+                        }
+                    }
+                }
+            }
+
+            return outdegree;
         }
 
         /// Delete a hyperedge.
@@ -871,4 +930,52 @@ test "delete vertex by index from hyperedge" {
     try graph.deleteVertexByIndexFromHyperedge(hyperedge_id, nb_vertices - 2);
     const last_vertex_hyperedges = try graph.getVertexHyperedges(ids[nb_vertices - 3]);
     try expect(last_vertex_hyperedges.len == 1);
+}
+
+test "get vertex indegree" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const v_a = try graph.createVertex(.{});
+    const v_b = try graph.createVertex(.{});
+    const v_c = try graph.createVertex(.{});
+    const v_d = try graph.createVertex(.{});
+    const v_e = try graph.createVertex(.{});
+
+    const h_a = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
+    const h_b = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
+    const h_c = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
+
+    try expect(try graph.getVertexIndegree(v_a) == 2);
+    try expect(try graph.getVertexIndegree(v_b) == 2);
+    try expect(try graph.getVertexIndegree(v_c) == 3);
+    try expect(try graph.getVertexIndegree(v_d) == 2);
+    try expect(try graph.getVertexIndegree(v_e) == 3);
+}
+
+test "get vertex outdegree" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const v_a = try graph.createVertex(.{});
+    const v_b = try graph.createVertex(.{});
+    const v_c = try graph.createVertex(.{});
+    const v_d = try graph.createVertex(.{});
+    const v_e = try graph.createVertex(.{});
+
+    const h_a = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
+    const h_b = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
+    const h_c = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
+
+    try expect(try graph.getVertexOutdegree(v_a) == 2);
+    try expect(try graph.getVertexOutdegree(v_b) == 2);
+    try expect(try graph.getVertexOutdegree(v_c) == 3);
+    try expect(try graph.getVertexOutdegree(v_d) == 2);
+    try expect(try graph.getVertexOutdegree(v_e) == 3);
 }
