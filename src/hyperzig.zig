@@ -26,8 +26,11 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
     return struct {
         const Self = @This();
 
+        /// The allocator used by the HyperZig instance.
         allocator: Allocator,
+        /// A hashmap of hyperedges.
         hyperedges: AutoArrayHashMap(Uuid, EntityArrayList(H)),
+        /// A hashmap of vertices.
         vertices: AutoArrayHashMap(Uuid, EntityArrayHashMap(V)),
 
         comptime {
@@ -35,6 +38,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             assert(@typeInfo(V) == .Struct);
         }
 
+        /// Entity array hashmap type.
         fn EntityArrayHashMap(
             comptime D: type,
         ) type {
@@ -44,6 +48,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             };
         }
 
+        /// Entity array list type.
         fn EntityArrayList(
             comptime D: type,
         ) type {
@@ -55,6 +60,8 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
         /// Create a new HyperZig instance.
         fn init(allocator: Allocator) Self {
+            // We use an array list for hyperedges and an array hashmap for vertices.
+            // The hyperedges can't be a hashmap since a hyperedge can contain the same vertex multiple times.
             const h = AutoArrayHashMap(Uuid, EntityArrayList(H)).init(allocator);
             const v = AutoArrayHashMap(Uuid, EntityArrayHashMap(V)).init(allocator);
 
@@ -533,6 +540,47 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             }
 
             debug("vertice {} at index {} deleted from hyperedge {}", .{ vertex_id, index, hyperedge_id });
+        }
+
+        /// Get the intersections between multiple hyperedges.
+        /// This method returns an owned slice which must be freed by the caller.
+        fn getIntersections(self: *Self, hyperedges_ids: []const Uuid) HyperZigError![]const Uuid {
+            for (hyperedges_ids) |id| {
+                try self.checkIfHyperedgeExists(id);
+            }
+
+            // We don't need to release the memory here since the caller will do it.
+            var intersections = ArrayList(Uuid).init(self.allocator);
+            var matches = AutoArrayHashMap(Uuid, usize).init(self.allocator);
+            defer matches.deinit();
+
+            for (hyperedges_ids) |id| {
+                const hyperedge = self.hyperedges.getPtr(id).?;
+
+                // Keep track of visited vertices since the same vertex can appear multiple times within a hyperedge.
+                var visited = AutoArrayHashMap(Uuid, void).init(self.allocator);
+                defer visited.deinit();
+
+                for (hyperedge.connections.items) |v| {
+                    if (visited.get(v) != null) {
+                        continue;
+                    }
+                    const result = try matches.getOrPut(v);
+                    try visited.put(v, {});
+                    if (result.found_existing) {
+                        result.value_ptr.* += 1;
+                        if (result.value_ptr.* == hyperedges_ids.len) {
+                            debug("intersection found at vertex {}", .{v});
+                            try intersections.append(v);
+                        }
+                    } else {
+                        // Initialize.
+                        result.value_ptr.* = 1;
+                    }
+                }
+            }
+
+            return try intersections.toOwnedSlice();
         }
     };
 }
@@ -1024,4 +1072,28 @@ test "update vertex" {
     const vertex = try graph.getVertex(vertex_id);
     try expect(@TypeOf(vertex) == Vertex);
     try expect(vertex.purr);
+}
+
+test "get intersections" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const v_a = try graph.createVertex(.{});
+    const v_b = try graph.createVertex(.{});
+    const v_c = try graph.createVertex(.{});
+    const v_d = try graph.createVertex(.{});
+    const v_e = try graph.createVertex(.{});
+
+    const h_a = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
+    const h_b = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
+    const h_c = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
+
+    const hyperedges = [_]Uuid{ h_a, h_b, h_c };
+    const expected = [_]Uuid{ v_e, v_a };
+    const intersections = try graph.getIntersections(&hyperedges);
+    defer graph.allocator.free(intersections);
+    try std.testing.expectEqualSlices(Uuid, &expected, intersections);
 }
