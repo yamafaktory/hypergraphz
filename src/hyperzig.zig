@@ -244,6 +244,60 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             return outdegree;
         }
 
+        /// Struct containing the adjacents vertices as a hashmap.
+        /// The caller is responsible for freeing the memory with `denit`.
+        const AdjacencyResult = struct {
+            const S = @This();
+
+            data: AutoArrayHashMap(Uuid, ArrayList(Uuid)),
+
+            fn deinit(self: *S) void {
+                // Deinit the array lists.
+                var it = self.data.iterator();
+                while (it.next()) |kv| {
+                    kv.value_ptr.deinit();
+                }
+
+                self.data.deinit();
+                self.* = undefined;
+            }
+        };
+        /// Get the adjacents vertices connected to a vertex.
+        fn getVertexAdjacencyTo(self: *Self, id: Uuid) HyperZigError!AdjacencyResult {
+            try self.checkIfVertexExists(id);
+
+            // We don't need to release the memory here since the caller will do it.
+            var adjacents = AutoArrayHashMap(Uuid, ArrayList(Uuid)).init(self.allocator);
+            const vertex = self.vertices.get(id).?;
+            var it = vertex.connections.iterator();
+            while (it.next()) |kv| {
+                const hyperedge_id = kv.key_ptr.*;
+                const hyperedge = self.hyperedges.get(hyperedge_id).?;
+                if (hyperedge.connections.items.len > 0) {
+                    // Act as a window over the hyperedge connections.
+                    // Skip the first element since it has an indegree of 0.
+                    for (hyperedge.connections.items, 0..) |v, i| {
+                        if (i == 0) {
+                            continue;
+                        }
+
+                        if (v == id) {
+                            const adjacent = hyperedge.connections.items[i - 1];
+                            const result = try adjacents.getOrPut(hyperedge_id);
+                            // Initialize if not found.
+                            if (!result.found_existing) {
+                                result.value_ptr.* = ArrayList(Uuid).init(self.allocator);
+                            }
+                            try result.value_ptr.*.append(adjacent);
+                            debug("adjacent vertex {} to vertex {} found in hyperedge {}", .{ adjacent, id, hyperedge_id });
+                        }
+                    }
+                }
+            }
+
+            return .{ .data = adjacents };
+        }
+
         /// Delete a hyperedge.
         fn deleteHyperedge(self: *Self, id: Uuid, drop_vertices: bool) HyperZigError!void {
             try self.checkIfHyperedgeExists(id);
@@ -600,6 +654,42 @@ fn scaffold() HyperZigError!HyperZig(Hyperedge, Vertex) {
     ).init(std.testing.allocator);
 
     return graph;
+}
+
+const Data = struct {
+    v_a: Uuid,
+    v_b: Uuid,
+    v_c: Uuid,
+    v_d: Uuid,
+    v_e: Uuid,
+    h_a: Uuid,
+    h_b: Uuid,
+    h_c: Uuid,
+};
+fn generateTestData(graph: *HyperZig(Hyperedge, Vertex)) !Data {
+    const v_a = try graph.createVertex(.{});
+    const v_b = try graph.createVertex(.{});
+    const v_c = try graph.createVertex(.{});
+    const v_d = try graph.createVertex(.{});
+    const v_e = try graph.createVertex(.{});
+
+    const h_a = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
+    const h_b = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
+    const h_c = try graph.createHyperedge(.{});
+    try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
+
+    return .{
+        .v_a = v_a,
+        .v_b = v_b,
+        .v_c = v_c,
+        .v_d = v_d,
+        .v_e = v_e,
+        .h_a = h_a,
+        .h_b = h_b,
+        .h_c = h_c,
+    };
 }
 
 test "create and get hyperedge" {
@@ -998,52 +1088,30 @@ test "get vertex indegree" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const v_a = try graph.createVertex(.{});
-    const v_b = try graph.createVertex(.{});
-    const v_c = try graph.createVertex(.{});
-    const v_d = try graph.createVertex(.{});
-    const v_e = try graph.createVertex(.{});
-
-    const h_a = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
-    const h_b = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
-    const h_c = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
+    const data = try generateTestData(&graph);
 
     try expectError(HyperZigError.VertexNotFound, graph.getVertexIndegree(1));
 
-    try expect(try graph.getVertexIndegree(v_a) == 2);
-    try expect(try graph.getVertexIndegree(v_b) == 2);
-    try expect(try graph.getVertexIndegree(v_c) == 3);
-    try expect(try graph.getVertexIndegree(v_d) == 2);
-    try expect(try graph.getVertexIndegree(v_e) == 3);
+    try expect(try graph.getVertexIndegree(data.v_a) == 2);
+    try expect(try graph.getVertexIndegree(data.v_b) == 2);
+    try expect(try graph.getVertexIndegree(data.v_c) == 3);
+    try expect(try graph.getVertexIndegree(data.v_d) == 2);
+    try expect(try graph.getVertexIndegree(data.v_e) == 3);
 }
 
 test "get vertex outdegree" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const v_a = try graph.createVertex(.{});
-    const v_b = try graph.createVertex(.{});
-    const v_c = try graph.createVertex(.{});
-    const v_d = try graph.createVertex(.{});
-    const v_e = try graph.createVertex(.{});
-
-    const h_a = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
-    const h_b = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
-    const h_c = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
+    const data = try generateTestData(&graph);
 
     try expectError(HyperZigError.VertexNotFound, graph.getVertexOutdegree(1));
 
-    try expect(try graph.getVertexOutdegree(v_a) == 2);
-    try expect(try graph.getVertexOutdegree(v_b) == 2);
-    try expect(try graph.getVertexOutdegree(v_c) == 3);
-    try expect(try graph.getVertexOutdegree(v_d) == 2);
-    try expect(try graph.getVertexOutdegree(v_e) == 3);
+    try expect(try graph.getVertexOutdegree(data.v_a) == 2);
+    try expect(try graph.getVertexOutdegree(data.v_b) == 2);
+    try expect(try graph.getVertexOutdegree(data.v_c) == 3);
+    try expect(try graph.getVertexOutdegree(data.v_d) == 2);
+    try expect(try graph.getVertexOutdegree(data.v_e) == 3);
 }
 
 test "update hyperedge" {
@@ -1078,22 +1146,131 @@ test "get intersections" {
     var graph = try scaffold();
     defer graph.deinit();
 
-    const v_a = try graph.createVertex(.{});
-    const v_b = try graph.createVertex(.{});
-    const v_c = try graph.createVertex(.{});
-    const v_d = try graph.createVertex(.{});
-    const v_e = try graph.createVertex(.{});
+    const data = try generateTestData(&graph);
 
-    const h_a = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
-    const h_b = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
-    const h_c = try graph.createHyperedge(.{});
-    try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
-
-    const hyperedges = [_]Uuid{ h_a, h_b, h_c };
-    const expected = [_]Uuid{ v_e, v_a };
+    const hyperedges = [_]Uuid{ data.h_a, data.h_b, data.h_c };
+    const expected = [_]Uuid{ data.v_e, data.v_a };
     const intersections = try graph.getIntersections(&hyperedges);
     defer graph.allocator.free(intersections);
     try std.testing.expectEqualSlices(Uuid, &expected, intersections);
+}
+
+test "get vertex adjacency to" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    try expectError(HyperZigError.VertexNotFound, graph.getVertexAdjacencyTo(1));
+
+    // try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
+    // const h_b = try graph.createHyperedge(.{});
+    // try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
+    // const h_c = try graph.createHyperedge(.{});
+    // try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
+
+    {
+        var result = try graph.getVertexAdjacencyTo(data.v_a);
+        defer result.deinit();
+        try expect(result.data.count() == 2);
+        var it = result.data.iterator();
+        var i: usize = 0;
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_b);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_e);
+            } else if (i == 1) {
+                try expect(kv.key_ptr.* == data.h_c);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_e);
+            }
+            i += 1;
+        }
+    }
+
+    {
+        var result = try graph.getVertexAdjacencyTo(data.v_b);
+        defer result.deinit();
+        try expect(result.data.count() == 2);
+        var it = result.data.iterator();
+        var i: usize = 0;
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_a);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_a);
+            } else if (i == 1) {
+                try expect(kv.key_ptr.* == data.h_c);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_d);
+            }
+            i += 1;
+        }
+    }
+
+    {
+        var result = try graph.getVertexAdjacencyTo(data.v_c);
+        defer result.deinit();
+        try expect(result.data.count() == 2);
+        var it = result.data.iterator();
+        var i: usize = 0;
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_a);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_b);
+            } else if (i == 1) {
+                try expect(kv.key_ptr.* == data.h_c);
+                try expect(kv.value_ptr.*.items.len == 2);
+                try expect(kv.value_ptr.*.items[0] == data.v_b);
+                try expect(kv.value_ptr.*.items[1] == data.v_c);
+            }
+            i += 1;
+        }
+    }
+
+    {
+        var result = try graph.getVertexAdjacencyTo(data.v_d);
+        defer result.deinit();
+        try expect(result.data.count() == 2);
+        var it = result.data.iterator();
+        var i: usize = 0;
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_a);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_c);
+            } else if (i == 1) {
+                try expect(kv.key_ptr.* == data.h_c);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_a);
+            }
+            i += 1;
+        }
+    }
+
+    {
+        var result = try graph.getVertexAdjacencyTo(data.v_e);
+        defer result.deinit();
+        try expect(result.data.count() == 3);
+        var it = result.data.iterator();
+        var i: usize = 0;
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_a);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_d);
+            } else if (i == 1) {
+                try expect(kv.key_ptr.* == data.h_b);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_e);
+            } else if (i == 2) {
+                try expect(kv.key_ptr.* == data.h_c);
+                try expect(kv.value_ptr.*.items.len == 1);
+                try expect(kv.value_ptr.*.items[0] == data.v_c);
+            }
+            i += 1;
+        }
+    }
 }
