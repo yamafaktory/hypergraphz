@@ -8,7 +8,9 @@ const uuid = @import("uuid");
 
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const AutoHashMap = std.AutoHashMap;
 const AutoArrayHashMap = std.array_hash_map.AutoArrayHashMap;
+const PriorityQueue = std.PriorityQueue;
 const Uuid = uuid.Uuid;
 const assert = std.debug.assert;
 const debug = std.log.debug;
@@ -22,6 +24,7 @@ pub const HyperZigError = (error{
 
 /// Create a hypergraph with hyperedges and vertices as comptime types.
 /// Both vertex and hyperedge must be struct types.
+/// Every hyperedge must have a `weight` field of type `.Int`.
 pub fn HyperZig(comptime H: type, comptime V: type) type {
     return struct {
         const Self = @This();
@@ -35,6 +38,14 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
         comptime {
             assert(@typeInfo(H) == .Struct);
+            var weightFieldType: ?type = null;
+            for (@typeInfo(H).Struct.fields) |f| {
+                if (std.mem.eql(u8, f.name, "weight")) {
+                    weightFieldType = f.type;
+                }
+            }
+            const isWeightInt = if (weightFieldType) |w| @typeInfo(w) == .Int else false;
+            assert(isWeightInt);
             assert(@typeInfo(V) == .Struct);
         }
 
@@ -246,13 +257,11 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
         /// Struct containing the adjacents vertices as a hashmap whose keys are
         /// hyperedge ids and values are an array of adjacent vertices.
-        /// The caller is responsible for freeing the memory with `denit`.
+        /// The caller is responsible for freeing the memory with `deinit`.
         const AdjacencyResult = struct {
-            const S = @This();
-
             data: AutoArrayHashMap(Uuid, ArrayList(Uuid)),
 
-            fn deinit(self: *S) void {
+            fn deinit(self: *AdjacencyResult) void {
                 // Deinit the array lists.
                 var it = self.data.iterator();
                 while (it.next()) |kv| {
@@ -676,13 +685,117 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
             return try intersections.toOwnedSlice();
         }
+
+        const Node = struct {
+            from: Uuid,
+            weight: usize,
+        };
+        const CameFrom = AutoHashMap(Uuid, ?Node);
+        const Queue = PriorityQueue(Uuid, *const CameFrom, compareNode);
+        fn compareNode(map: *const CameFrom, n1: Uuid, n2: Uuid) std.math.Order {
+            const node1 = map.get(n1).?;
+            const node2 = map.get(n2).?;
+
+            return std.math.order(node1.?.weight, node2.?.weight);
+        }
+        /// Struct containing the shortest path as a list of vertices.
+        /// The caller is responsible for freeing the memory with `deinit`.
+        const ShortestPathResult = struct {
+            data: ?ArrayList(Uuid),
+
+            fn deinit(self: *ShortestPathResult) void {
+                self.data.?.deinit();
+                self.* = undefined;
+            }
+        };
+        /// Find the shortest path between two vertices using the A* algorithm.
+        /// The caller is responsible for freeing the result memory with `deinit`.
+        fn findShortestPath(self: *Self, from: Uuid, to: Uuid) HyperZigError!ShortestPathResult {
+            try self.checkIfVertexExists(from);
+            try self.checkIfVertexExists(to);
+
+            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+
+            var came_from = CameFrom.init(arena.allocator());
+            var cost_so_far = std.AutoHashMap(Uuid, usize).init(arena.allocator());
+            var frontier = Queue.init(arena.allocator(), &came_from);
+
+            try came_from.put(from, null);
+            try cost_so_far.put(from, 0);
+            try frontier.add(from);
+
+            while (frontier.count() != 0) {
+                const current = frontier.remove();
+
+                if (current == to) break;
+
+                // Get adjacent vertices and their weights from the current hyperedge.
+                var result = try self.getVertexAdjacencyFrom(current);
+                defer result.deinit();
+                var adjacentsWithWeight = AutoArrayHashMap(Uuid, usize).init(self.allocator);
+                defer adjacentsWithWeight.deinit();
+                var it = result.data.iterator();
+                while (it.next()) |kv| {
+                    const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
+                    const hWeight = hyperedge.data.weight;
+                    for (kv.value_ptr.*.items) |v| {
+                        try adjacentsWithWeight.put(v, hWeight);
+                    }
+                }
+
+                // Apply A* on the adjacent vertices.
+                var weighted_it = adjacentsWithWeight.iterator();
+                while (weighted_it.next()) |kv| {
+                    const next = kv.key_ptr.*;
+                    const new_cost = (cost_so_far.get(current) orelse 0) + kv.value_ptr.*;
+                    if (!cost_so_far.contains(next) or new_cost < cost_so_far.get(next).?) {
+                        try cost_so_far.put(next, new_cost);
+                        try came_from.put(next, .{ .weight = kv.value_ptr.*, .from = current });
+                        try frontier.add(next);
+                    }
+                }
+            }
+
+            var it = came_from.iterator();
+            var visited = AutoArrayHashMap(Uuid, Uuid).init(self.allocator);
+            defer visited.deinit();
+            while (it.next()) |kv| {
+                const node = kv.value_ptr.*;
+                const origin = kv.key_ptr.*;
+                const dest = if (node) |n| n.from else 0;
+                try visited.put(origin, dest);
+            }
+
+            var last = visited.get(to);
+
+            if (last == null) {
+                debug("no path found between {} and {}", .{ from, to });
+                return .{ .data = null };
+            }
+
+            // We iterate in reverse order.
+            var path = ArrayList(Uuid).init(self.allocator);
+            try path.append(to);
+            while (true) {
+                try path.append(last.?);
+                const next = visited.get(last.?);
+                if (next == null or next == 0) break;
+                last = next;
+            }
+            std.mem.reverse(Uuid, path.items);
+
+            debug("path found between {} and {}", .{ from, to });
+            return .{ .data = path };
+        }
     };
 }
 
 const expect = std.testing.expect;
+const expectEqualSlices = std.testing.expectEqualSlices;
 const expectError = std.testing.expectError;
 
-const Hyperedge = struct { meow: bool = false };
+const Hyperedge = struct { meow: bool = false, weight: usize = 1 };
 const Vertex = struct { purr: bool = false };
 
 fn scaffold() HyperZigError!HyperZig(Hyperedge, Vertex) {
@@ -1417,5 +1530,43 @@ test "get vertex adjacency from" {
             }
             i += 1;
         }
+    }
+}
+
+test "find shortest path" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    try expectError(HyperZigError.VertexNotFound, graph.findShortestPath(1, data.v_a));
+    try expectError(HyperZigError.VertexNotFound, graph.findShortestPath(data.v_a, 1));
+
+    {
+        var result = try graph.findShortestPath(data.v_a, data.v_e);
+        defer result.deinit();
+
+        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_a, data.v_d, data.v_e }, result.data.?.items);
+    }
+
+    {
+        var result = try graph.findShortestPath(data.v_b, data.v_e);
+        defer result.deinit();
+
+        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_b, data.v_c, data.v_e }, result.data.?.items);
+    }
+
+    {
+        var result = try graph.findShortestPath(data.v_d, data.v_a);
+        defer result.deinit();
+
+        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_d, data.v_e, data.v_a }, result.data.?.items);
+    }
+
+    {
+        var result = try graph.findShortestPath(data.v_c, data.v_b);
+        defer result.deinit();
+
+        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_c, data.v_d, data.v_b }, result.data.?.items);
     }
 }
