@@ -704,7 +704,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             data: ?ArrayList(Uuid),
 
             fn deinit(self: *ShortestPathResult) void {
-                self.data.?.deinit();
+                if (self.data) |d| d.deinit();
                 self.* = undefined;
             }
         };
@@ -778,6 +778,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             var path = ArrayList(Uuid).init(self.allocator);
             try path.append(to);
             while (true) {
+                if (last == 0) break;
                 try path.append(last.?);
                 const next = visited.get(last.?);
                 if (next == null or next == 0) break;
@@ -1482,10 +1483,10 @@ test "get vertex adjacency from" {
                 try expect(kv.value_ptr.*.items.len == 1);
                 try expect(kv.value_ptr.*.items[0] == data.v_d);
             } else if (i == 1) {
-                // try expect(kv.key_ptr.* == data.h_c);
-                // try expect(kv.value_ptr.*.items.len == 2);
-                // try expect(kv.value_ptr.*.items[0] == data.v_c);
-                // try expect(kv.value_ptr.*.items[1] == data.v_e);
+                try expect(kv.key_ptr.* == data.h_c);
+                try expect(kv.value_ptr.*.items.len == 2);
+                try expect(kv.value_ptr.*.items[0] == data.v_c);
+                try expect(kv.value_ptr.*.items[1] == data.v_e);
             }
             i += 1;
         }
@@ -1568,5 +1569,30 @@ test "find shortest path" {
         defer result.deinit();
 
         try expectEqualSlices(Uuid, &[_]Uuid{ data.v_c, data.v_d, data.v_b }, result.data.?.items);
+    }
+
+    {
+        var result = try graph.findShortestPath(data.v_d, data.v_b);
+        defer result.deinit();
+        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_d, data.v_b }, result.data.?.items);
+    }
+
+    {
+        var result = try graph.findShortestPath(data.v_c, data.v_c);
+        defer result.deinit();
+        try expectEqualSlices(Uuid, &[_]Uuid{data.v_c}, result.data.?.items);
+    }
+
+    {
+        var result = try graph.findShortestPath(data.v_e, data.v_e);
+        defer result.deinit();
+        try expectEqualSlices(Uuid, &[_]Uuid{data.v_e}, result.data.?.items);
+    }
+
+    {
+        const disconnected = try graph.createVertex(Vertex{});
+        var result = try graph.findShortestPath(data.v_a, disconnected);
+        defer result.deinit();
+        try expect(result.data == null);
     }
 }
