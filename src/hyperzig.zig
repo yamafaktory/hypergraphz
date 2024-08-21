@@ -796,6 +796,16 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             debug("path found between {} and {}", .{ from, to });
             return .{ .data = path };
         }
+
+        /// Reverse a hyperedge.
+        fn reverseHyperedge(self: *Self, hyperedge_id: Uuid) !void {
+            try self.checkIfHyperedgeExists(hyperedge_id);
+
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
+            const tmp = try hyperedge.connections.toOwnedSlice();
+            std.mem.reverse(Uuid, tmp);
+            hyperedge.connections = ArrayList(Uuid).fromOwnedSlice(self.allocator, tmp);
+        }
     };
 }
 
@@ -1604,4 +1614,19 @@ test "find shortest path" {
         defer result.deinit();
         try expect(result.data == null);
     }
+}
+
+test "reverse hyperedge" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    try expectError(HyperZigError.HyperedgeNotFound, graph.reverseHyperedge(1));
+
+    try graph.reverseHyperedge(data.h_a);
+    const vertices = try graph.getHyperedgeVertices(data.h_a);
+    try expect(vertices.len == 5);
+    try expect(vertices[0] == data.v_e);
+    try expect(vertices[4] == data.v_a);
 }
