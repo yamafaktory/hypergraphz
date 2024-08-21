@@ -18,8 +18,10 @@ const debug = std.log.debug;
 /// HyperZig errors.
 pub const HyperZigError = (error{
     HyperedgeNotFound,
-    VertexNotFound,
     IndexOutOfBounds,
+    NoVerticesToInsert,
+    NotEnoughHyperedgesProvided,
+    VertexNotFound,
 } || Allocator.Error);
 
 /// Create a hypergraph with hyperedges and vertices as comptime types.
@@ -105,7 +107,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             arrayHash: *EntityArrayHashMap(V),
         };
         /// Internal method to initialize entity connections if necessary.
-        fn initConnectionsIfEmpty(self: Self, entity: EntityUnion) void {
+        fn _initConnectionsIfEmpty(self: Self, entity: EntityUnion) void {
             switch (entity) {
                 .arrayList => |a| {
                     if (a.connections.items.len == 0) {
@@ -439,13 +441,13 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(vertex_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Append vertex to hyperedge connections.
             try hyperedge.connections.append(vertex_id);
 
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
             try vertex.connections.put(hyperedge_id, {});
 
@@ -461,13 +463,13 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(vertex_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Prepend vertex to hyperedge connections.
             try hyperedge.connections.insertSlice(0, &.{vertex_id});
 
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
             try vertex.connections.put(hyperedge_id, {});
 
@@ -486,13 +488,13 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             if (index > hyperedge.connections.items.len) {
                 return HyperZigError.IndexOutOfBounds;
             }
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Insert vertex into hyperedge connections at given index.
             try hyperedge.connections.insert(index, vertex_id);
 
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
             try vertex.connections.put(hyperedge_id, {});
 
@@ -516,7 +518,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             }
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Append vertices to hyperedge connections.
             try hyperedge.connections.appendSlice(vertex_ids);
@@ -524,7 +526,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             for (vertex_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
-                self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+                self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
                 try vertex.connections.put(hyperedge_id, {});
             }
@@ -545,7 +547,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             }
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Prepend vertices to hyperedge connections.
             try hyperedge.connections.insertSlice(0, vertices_ids);
@@ -553,7 +555,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
-                self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+                self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
                 try vertex.connections.put(hyperedge_id, {});
             }
@@ -565,7 +567,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid, index: usize) HyperZigError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to insert into hyperedge {}, skipping", .{hyperedge_id});
-                return;
+                return HyperZigError.NoVerticesToInsert;
             }
 
             try self.checkIfHyperedgeExists(hyperedge_id);
@@ -577,7 +579,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             if (index > hyperedge.connections.items.len) {
                 return HyperZigError.IndexOutOfBounds;
             }
-            self.initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Prepend vertices to hyperedge connections.
             try hyperedge.connections.insertSlice(index, vertices_ids);
@@ -585,7 +587,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
-                self.initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+                self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
                 try vertex.connections.put(hyperedge_id, {});
             }
@@ -631,7 +633,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             const vertex_id = hyperedge.connections.orderedRemove(index);
             const vertex = self.vertices.getPtr(vertex_id).?;
 
-            // Check that if the same vertex appears again in this hyperedge.
+            // Check if the same vertex appears again in this hyperedge.
             // If not, we can remove the hyperedge from the vertex connections.
             for (hyperedge.connections.items) |v| {
                 if (v == vertex_id) {
@@ -648,6 +650,11 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Get the intersections between multiple hyperedges.
         /// This method returns an owned slice which must be freed by the caller.
         fn getIntersections(self: *Self, hyperedges_ids: []const Uuid) HyperZigError![]const Uuid {
+            if (hyperedges_ids.len < 2) {
+                debug("at least two hyperedges must be provided, skipping", .{});
+                return HyperZigError.NotEnoughHyperedgesProvided;
+            }
+
             for (hyperedges_ids) |id| {
                 try self.checkIfHyperedgeExists(id);
             }
@@ -1046,9 +1053,9 @@ test "insert vertices into hyperedge" {
 
     try expectError(HyperZigError.HyperedgeNotFound, graph.insertVerticesIntoHyperedge(1, ids, 0));
 
-    try expectError(HyperZigError.IndexOutOfBounds, graph.insertVerticesIntoHyperedge(hyperedge_id, ids, 10));
+    try expectError(HyperZigError.NoVerticesToInsert, graph.insertVerticesIntoHyperedge(hyperedge_id, &.{}, 0));
 
-    try expect(try graph.insertVerticesIntoHyperedge(hyperedge_id, &.{}, 0) == undefined);
+    try expectError(HyperZigError.IndexOutOfBounds, graph.insertVerticesIntoHyperedge(hyperedge_id, ids, 10));
 
     // Insert the first vertex, then the rest and check that inserting works.
     try graph.insertVertexIntoHyperedge(hyperedge_id, ids[0], 0);
@@ -1301,6 +1308,8 @@ test "get intersections" {
     defer graph.deinit();
 
     const data = try generateTestData(&graph);
+
+    try expectError(HyperZigError.NotEnoughHyperedgesProvided, graph.getIntersections(&[_]Uuid{1}));
 
     const hyperedges = [_]Uuid{ data.h_a, data.h_b, data.h_c };
     const expected = [_]Uuid{ data.v_e, data.v_a };
