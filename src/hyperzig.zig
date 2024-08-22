@@ -51,23 +51,23 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             assert(@typeInfo(V) == .Struct);
         }
 
-        /// Entity array hashmap type.
+        /// Entity with data and relations as an array hashmap.
         fn EntityArrayHashMap(
             comptime D: type,
         ) type {
             return struct {
                 data: D,
-                connections: AutoArrayHashMap(Uuid, void),
+                relations: AutoArrayHashMap(Uuid, void),
             };
         }
 
-        /// Entity array list type.
+        /// Entity with data and relations as an array list.
         fn EntityArrayList(
             comptime D: type,
         ) type {
             return struct {
                 data: D,
-                connections: ArrayList(Uuid),
+                relations: ArrayList(Uuid),
             };
         }
 
@@ -83,16 +83,16 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
         /// Deinit the HyperZig instance.
         fn deinit(self: *Self) void {
-            // Deinit hyperedge connections.
+            // Deinit hyperedge relations.
             var h_it = self.hyperedges.iterator();
             while (h_it.next()) |kv| {
-                kv.value_ptr.connections.deinit();
+                kv.value_ptr.relations.deinit();
             }
 
-            // Deinit vertex connections.
+            // Deinit vertex relations.
             var v_it = self.vertices.iterator();
             while (v_it.next()) |kv| {
-                kv.value_ptr.connections.deinit();
+                kv.value_ptr.relations.deinit();
             }
 
             // Finally deinit all entities and the struct itself.
@@ -106,17 +106,17 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             arrayList: *EntityArrayList(H),
             arrayHash: *EntityArrayHashMap(V),
         };
-        /// Internal method to initialize entity connections if necessary.
-        fn _initConnectionsIfEmpty(self: Self, entity: EntityUnion) void {
+        /// Internal method to initialize entity relations if necessary.
+        fn _initRelationsIfEmpty(self: Self, entity: EntityUnion) void {
             switch (entity) {
                 .arrayList => |a| {
-                    if (a.connections.items.len == 0) {
-                        a.connections = ArrayList(Uuid).init(self.allocator);
+                    if (a.relations.items.len == 0) {
+                        a.relations = ArrayList(Uuid).init(self.allocator);
                     }
                 },
                 .arrayHash => |a| {
-                    if (a.connections.count() == 0) {
-                        a.connections = AutoArrayHashMap(Uuid, void).init(self.allocator);
+                    if (a.relations.count() == 0) {
+                        a.relations = AutoArrayHashMap(Uuid, void).init(self.allocator);
                     }
                 },
             }
@@ -125,7 +125,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Create a new hyperedge.
         fn createHyperedge(self: *Self, hyperedge: H) Allocator.Error!Uuid {
             const id = uuid.v7.new();
-            try self.hyperedges.put(id, .{ .connections = undefined, .data = hyperedge });
+            try self.hyperedges.put(id, .{ .relations = undefined, .data = hyperedge });
 
             return id;
         }
@@ -133,7 +133,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Create a new vertex.
         fn createVertex(self: *Self, vertex: V) Allocator.Error!Uuid {
             const id = uuid.v7.new();
-            try self.vertices.put(id, .{ .connections = undefined, .data = vertex });
+            try self.vertices.put(id, .{ .relations = undefined, .data = vertex });
 
             return id;
         }
@@ -206,13 +206,13 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
             const vertex = self.vertices.get(id).?;
             var indegree: usize = 0;
-            var it = vertex.connections.iterator();
+            var it = vertex.relations.iterator();
             while (it.next()) |kv| {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
-                if (hyperedge.connections.items.len > 0) {
-                    // Act as a window over the hyperedge connections.
+                if (hyperedge.relations.items.len > 0) {
+                    // Act as a window over the hyperedge relations.
                     // Skip the first element since it has an indegree of 0.
-                    for (hyperedge.connections.items, 0..) |v, i| {
+                    for (hyperedge.relations.items, 0..) |v, i| {
                         if (i == 0) {
                             continue;
                         }
@@ -235,14 +235,14 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
             const vertex = self.vertices.get(id).?;
             var outdegree: usize = 0;
-            var it = vertex.connections.iterator();
+            var it = vertex.relations.iterator();
             while (it.next()) |kv| {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
-                if (hyperedge.connections.items.len > 0) {
-                    // Act as a window over the hyperedge connections.
+                if (hyperedge.relations.items.len > 0) {
+                    // Act as a window over the hyperedge relations.
                     // Skip the last element since it has an outdegree of 0.
-                    const last = hyperedge.connections.items.len - 1;
-                    for (hyperedge.connections.items, 0..) |v, i| {
+                    const last = hyperedge.relations.items.len - 1;
+                    for (hyperedge.relations.items, 0..) |v, i| {
                         if (i == last) {
                             break;
                         }
@@ -282,20 +282,20 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             // We don't need to release the memory here since the caller will do it.
             var adjacents = AutoArrayHashMap(Uuid, ArrayList(Uuid)).init(self.allocator);
             const vertex = self.vertices.get(id).?;
-            var it = vertex.connections.iterator();
+            var it = vertex.relations.iterator();
             while (it.next()) |kv| {
                 const hyperedge_id = kv.key_ptr.*;
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
-                if (hyperedge.connections.items.len > 0) {
-                    // Act as a window over the hyperedge connections.
+                if (hyperedge.relations.items.len > 0) {
+                    // Act as a window over the hyperedge relations.
                     // Skip the first element since it has an indegree of 0.
-                    for (hyperedge.connections.items, 0..) |v, i| {
+                    for (hyperedge.relations.items, 0..) |v, i| {
                         if (i == 0) {
                             continue;
                         }
 
                         if (v == id) {
-                            const adjacent = hyperedge.connections.items[i - 1];
+                            const adjacent = hyperedge.relations.items[i - 1];
                             const result = try adjacents.getOrPut(hyperedge_id);
                             // Initialize if not found.
                             if (!result.found_existing) {
@@ -319,21 +319,21 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             // We don't need to release the memory here since the caller will do it.
             var adjacents = AutoArrayHashMap(Uuid, ArrayList(Uuid)).init(self.allocator);
             const vertex = self.vertices.get(id).?;
-            var it = vertex.connections.iterator();
+            var it = vertex.relations.iterator();
             while (it.next()) |kv| {
                 const hyperedge_id = kv.key_ptr.*;
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
-                if (hyperedge.connections.items.len > 0) {
-                    // Act as a window over the hyperedge connections.
+                if (hyperedge.relations.items.len > 0) {
+                    // Act as a window over the hyperedge relations.
                     // Skip the last element since it has an outdegree of 0.
-                    const last = hyperedge.connections.items.len - 1;
-                    for (hyperedge.connections.items, 0..) |v, i| {
+                    const last = hyperedge.relations.items.len - 1;
+                    for (hyperedge.relations.items, 0..) |v, i| {
                         if (i == last) {
                             continue;
                         }
 
                         if (v == id) {
-                            const adjacent = hyperedge.connections.items[i + 1];
+                            const adjacent = hyperedge.relations.items[i + 1];
                             const result = try adjacents.getOrPut(hyperedge_id);
                             // Initialize if not found.
                             if (!result.found_existing) {
@@ -354,28 +354,28 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfHyperedgeExists(id);
 
             const hyperedge = self.hyperedges.getPtr(id).?;
-            const vertices = hyperedge.connections.items;
+            const vertices = hyperedge.relations.items;
 
             if (drop_vertices) {
                 // Delete vertices.
                 for (vertices) |v| {
                     const vertex = self.vertices.getPtr(v).?;
                     // Release memory.
-                    vertex.connections.deinit();
+                    vertex.relations.deinit();
                     const removed = self.vertices.orderedRemove(v);
                     assert(removed);
                 }
             } else {
-                // Delete the hyperedge from the vertex connections.
+                // Delete the hyperedge from the vertex relations.
                 for (vertices) |v| {
                     const vertex = self.vertices.getPtr(v);
-                    const removed = vertex.?.connections.orderedRemove(id);
+                    const removed = vertex.?.relations.orderedRemove(id);
                     assert(removed);
                 }
             }
 
             // Release memory.
-            hyperedge.connections.deinit();
+            hyperedge.relations.deinit();
 
             // Delete the hyperedge itself.
             const removed = self.hyperedges.orderedRemove(id);
@@ -389,26 +389,26 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.getPtr(id).?;
-            const hyperedges = vertex.connections.keys();
+            const hyperedges = vertex.relations.keys();
             for (hyperedges) |h| {
                 const hyperedge = self.hyperedges.getPtr(h).?;
-                // Delete the vertex from the hyperedge connections.
+                // Delete the vertex from the hyperedge relations.
                 // The same vertex can appear multiple times within a hyperedge.
-                // Create a temporary list to store the connections without the vertex.
+                // Create a temporary list to store the relations without the vertex.
                 var tmp = ArrayList(Uuid).init(self.allocator);
-                for (hyperedge.connections.items) |v| {
+                for (hyperedge.relations.items) |v| {
                     if (v != id) {
                         try tmp.append(v);
                     }
                 }
-                // Swap the temporary list with the hyperedge connections.
-                std.mem.swap(ArrayList(Uuid), &hyperedge.connections, &tmp);
+                // Swap the temporary list with the hyperedge relations.
+                std.mem.swap(ArrayList(Uuid), &hyperedge.relations, &tmp);
                 // Release the temporary list.
                 tmp.deinit();
             }
 
             // Release memory.
-            vertex.connections.deinit();
+            vertex.relations.deinit();
 
             // Delete the hyperedge itself.
             const removed = self.vertices.orderedRemove(id);
@@ -423,7 +423,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
 
-            return hyperedge.connections.items;
+            return hyperedge.relations.items;
         }
 
         /// Get all hyperedges of a vertex as a slice.
@@ -432,7 +432,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
             const vertex = self.vertices.getPtr(vertex_id).?;
 
-            return vertex.connections.keys();
+            return vertex.relations.keys();
         }
 
         /// Append a vertex to a hyperedge.
@@ -441,15 +441,15 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(vertex_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
-            // Append vertex to hyperedge connections.
-            try hyperedge.connections.append(vertex_id);
+            // Append vertex to hyperedge relations.
+            try hyperedge.relations.append(vertex_id);
 
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-            try vertex.connections.put(hyperedge_id, {});
+            try vertex.relations.put(hyperedge_id, {});
 
             debug("vertex {} appended to hyperedge {}", .{
                 vertex_id,
@@ -463,15 +463,15 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(vertex_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
-            // Prepend vertex to hyperedge connections.
-            try hyperedge.connections.insertSlice(0, &.{vertex_id});
+            // Prepend vertex to hyperedge relations.
+            try hyperedge.relations.insertSlice(0, &.{vertex_id});
 
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-            try vertex.connections.put(hyperedge_id, {});
+            try vertex.relations.put(hyperedge_id, {});
 
             debug("vertex {} prepended to hyperedge {}", .{
                 vertex_id,
@@ -485,18 +485,18 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(vertex_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            if (index > hyperedge.connections.items.len) {
+            if (index > hyperedge.relations.items.len) {
                 return HyperZigError.IndexOutOfBounds;
             }
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
-            // Insert vertex into hyperedge connections at given index.
-            try hyperedge.connections.insert(index, vertex_id);
+            // Insert vertex into hyperedge relations at given index.
+            try hyperedge.relations.insert(index, vertex_id);
 
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-            try vertex.connections.put(hyperedge_id, {});
+            try vertex.relations.put(hyperedge_id, {});
 
             debug("vertex {} inserted into hyperedge {} at index {}", .{
                 vertex_id,
@@ -518,17 +518,17 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             }
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
-            // Append vertices to hyperedge connections.
-            try hyperedge.connections.appendSlice(vertex_ids);
+            // Append vertices to hyperedge relations.
+            try hyperedge.relations.appendSlice(vertex_ids);
 
             for (vertex_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
-                self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+                self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-                try vertex.connections.put(hyperedge_id, {});
+                try vertex.relations.put(hyperedge_id, {});
             }
 
             debug("vertices appended to hyperedge {}", .{hyperedge_id});
@@ -547,17 +547,17 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             }
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
-            // Prepend vertices to hyperedge connections.
-            try hyperedge.connections.insertSlice(0, vertices_ids);
+            // Prepend vertices to hyperedge relations.
+            try hyperedge.relations.insertSlice(0, vertices_ids);
 
             for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
-                self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+                self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-                try vertex.connections.put(hyperedge_id, {});
+                try vertex.relations.put(hyperedge_id, {});
             }
 
             debug("vertices prepended to hyperedge {}", .{hyperedge_id});
@@ -576,20 +576,20 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             }
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            if (index > hyperedge.connections.items.len) {
+            if (index > hyperedge.relations.items.len) {
                 return HyperZigError.IndexOutOfBounds;
             }
-            self._initConnectionsIfEmpty(EntityUnion{ .arrayList = hyperedge });
+            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
-            // Prepend vertices to hyperedge connections.
-            try hyperedge.connections.insertSlice(index, vertices_ids);
+            // Prepend vertices to hyperedge relations.
+            try hyperedge.relations.insertSlice(index, vertices_ids);
 
             for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
 
-                self._initConnectionsIfEmpty(EntityUnion{ .arrayHash = vertex });
+                self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
 
-                try vertex.connections.put(hyperedge_id, {});
+                try vertex.relations.put(hyperedge_id, {});
             }
 
             debug("vertices inserted into hyperedge {} at index {}", .{ hyperedge_id, index });
@@ -603,20 +603,20 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
 
             // The same vertex can appear multiple times within a hyperedge.
-            // Create a temporary list to store the connections without the vertex.
+            // Create a temporary list to store the relations without the vertex.
             var tmp = ArrayList(Uuid).init(self.allocator);
-            for (hyperedge.connections.items) |v| {
+            for (hyperedge.relations.items) |v| {
                 if (v != vertex_id) {
                     try tmp.append(v);
                 }
             }
-            // Swap the temporary list with the hyperedge connections.
-            std.mem.swap(ArrayList(Uuid), &hyperedge.connections, &tmp);
+            // Swap the temporary list with the hyperedge relations.
+            std.mem.swap(ArrayList(Uuid), &hyperedge.relations, &tmp);
             // Release the temporary list.
             tmp.deinit();
 
             const vertex = self.vertices.getPtr(vertex_id).?;
-            const removed = vertex.connections.orderedRemove(hyperedge_id);
+            const removed = vertex.relations.orderedRemove(hyperedge_id);
             assert(removed);
             debug("vertice {} deleted from hyperedge {}", .{ vertex_id, hyperedge_id });
         }
@@ -626,21 +626,21 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            if (index > hyperedge.connections.items.len) {
+            if (index > hyperedge.relations.items.len) {
                 return HyperZigError.IndexOutOfBounds;
             }
 
-            const vertex_id = hyperedge.connections.orderedRemove(index);
+            const vertex_id = hyperedge.relations.orderedRemove(index);
             const vertex = self.vertices.getPtr(vertex_id).?;
 
             // Check if the same vertex appears again in this hyperedge.
-            // If not, we can remove the hyperedge from the vertex connections.
-            for (hyperedge.connections.items) |v| {
+            // If not, we can remove the hyperedge from the vertex relations.
+            for (hyperedge.relations.items) |v| {
                 if (v == vertex_id) {
                     break;
                 }
             } else {
-                const removed = vertex.connections.orderedRemove(hyperedge_id);
+                const removed = vertex.relations.orderedRemove(hyperedge_id);
                 assert(removed);
             }
 
@@ -671,7 +671,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 var visited = AutoArrayHashMap(Uuid, void).init(self.allocator);
                 defer visited.deinit();
 
-                for (hyperedge.connections.items) |v| {
+                for (hyperedge.relations.items) |v| {
                     if (visited.get(v) != null) {
                         continue;
                     }
@@ -802,9 +802,46 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            const tmp = try hyperedge.connections.toOwnedSlice();
+            const tmp = try hyperedge.relations.toOwnedSlice();
             std.mem.reverse(Uuid, tmp);
-            hyperedge.connections = ArrayList(Uuid).fromOwnedSlice(self.allocator, tmp);
+            hyperedge.relations = ArrayList(Uuid).fromOwnedSlice(self.allocator, tmp);
+        }
+
+        /// Join two or more hyperedges into one.
+        /// All the vertices are moved to the first hyperedge.
+        fn joinHyperedges(self: *Self, hyperedges_ids: []const Uuid) !void {
+            if (hyperedges_ids.len < 2) {
+                debug("at least two hyperedges must be provided, skipping", .{});
+                return HyperZigError.NotEnoughHyperedgesProvided;
+            }
+
+            for (hyperedges_ids) |h| {
+                try self.checkIfHyperedgeExists(h);
+            }
+
+            var first = self.hyperedges.getPtr(hyperedges_ids[0]).?;
+            for (hyperedges_ids[1..]) |h| {
+                const hyperedge = self.hyperedges.getPtr(h).?;
+                const items = hyperedge.relations.items;
+
+                // Move the vertices to the first hyperedge.
+                try first.relations.appendSlice(items);
+
+                // Delete the hyperedge from the vertex relations.
+                const vertices = hyperedge.relations.items;
+                for (vertices) |v| {
+                    // We can't assert that the removal is truthy since a vertex can appear multiple times within a hyperedge.
+                    const vertex = self.vertices.getPtr(v);
+                    _ = vertex.?.relations.orderedRemove(h);
+                }
+
+                // Release memory.
+                hyperedge.relations.deinit();
+
+                // Delete the hyperedge itself.
+                const removed = self.hyperedges.orderedRemove(h);
+                assert(removed);
+            }
         }
     };
 }
@@ -1238,7 +1275,7 @@ test "delete vertex by index from hyperedge" {
     try expectError(HyperZigError.HyperedgeNotFound, graph.deleteVertexByIndexFromHyperedge(1, 0));
 
     // Delete the first vertex.
-    // The hyperedge should be dropped from the connections.
+    // The hyperedge should be dropped from the relations.
     try graph.deleteVertexByIndexFromHyperedge(hyperedge_id, 0);
     const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == nb_vertices - 1);
@@ -1249,7 +1286,7 @@ test "delete vertex by index from hyperedge" {
     try expect(first_vertex_hyperedges.len == 0);
 
     // Delete the last vertex.
-    // The hyperedge should not be dropped from the connections.
+    // The hyperedge should not be dropped from the relations.
     try graph.deleteVertexByIndexFromHyperedge(hyperedge_id, nb_vertices - 2);
     const last_vertex_hyperedges = try graph.getVertexHyperedges(ids[nb_vertices - 3]);
     try expect(last_vertex_hyperedges.len == 1);
@@ -1629,4 +1666,23 @@ test "reverse hyperedge" {
     try expect(vertices.len == 5);
     try expect(vertices[0] == data.v_e);
     try expect(vertices[4] == data.v_a);
+}
+
+test "join hyperedges" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    try expectError(HyperZigError.HyperedgeNotFound, graph.joinHyperedges(&[_]Uuid{ 1, 2 }));
+    try expectError(HyperZigError.NotEnoughHyperedgesProvided, graph.joinHyperedges(&[_]Uuid{data.h_a}));
+
+    try graph.joinHyperedges(&[_]Uuid{ data.h_a, data.h_c });
+    const vertices = try graph.getHyperedgeVertices(data.h_a);
+    try expectEqualSlices(Uuid, &[_]Uuid{
+        data.v_a, data.v_b, data.v_c, data.v_d, data.v_e,
+        data.v_b, data.v_c, data.v_c, data.v_e, data.v_a,
+        data.v_d, data.v_b,
+    }, vertices);
+    try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedge(data.h_c));
 }
