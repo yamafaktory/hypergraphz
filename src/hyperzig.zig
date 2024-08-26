@@ -7,6 +7,7 @@ const std = @import("std");
 const uuid = @import("uuid");
 
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
 const AutoHashMap = std.AutoHashMap;
 const AutoArrayHashMap = std.array_hash_map.AutoArrayHashMap;
@@ -359,18 +360,23 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             if (drop_vertices) {
                 // Delete vertices.
                 for (vertices) |v| {
-                    const vertex = self.vertices.getPtr(v).?;
-                    // Release memory.
-                    vertex.relations.deinit();
-                    const removed = self.vertices.orderedRemove(v);
-                    assert(removed);
+                    const vertex = self.vertices.getPtr(v);
+                    // A vertex can appear multiple times within a hyperedge and thus might already be deleted.
+                    if (vertex) |ptr| {
+                        // Release memory.
+                        ptr.relations.deinit();
+                        const removed = self.vertices.orderedRemove(v);
+                        assert(removed);
+                    }
                 }
             } else {
                 // Delete the hyperedge from the vertex relations.
                 for (vertices) |v| {
                     const vertex = self.vertices.getPtr(v);
-                    const removed = vertex.?.relations.orderedRemove(id);
-                    assert(removed);
+                    // A vertex can appear multiple times within a hyperedge and thus might already be deleted.
+                    if (vertex) |ptr| {
+                        _ = ptr.relations.orderedRemove(id);
+                    }
                 }
             }
 
@@ -396,6 +402,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 // The same vertex can appear multiple times within a hyperedge.
                 // Create a temporary list to store the relations without the vertex.
                 var tmp = ArrayList(Uuid).init(self.allocator);
+                defer tmp.deinit();
                 for (hyperedge.relations.items) |v| {
                     if (v != id) {
                         try tmp.append(v);
@@ -403,8 +410,6 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 }
                 // Swap the temporary list with the hyperedge relations.
                 std.mem.swap(ArrayList(Uuid), &hyperedge.relations, &tmp);
-                // Release the temporary list.
-                tmp.deinit();
             }
 
             // Release memory.
@@ -605,6 +610,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             // The same vertex can appear multiple times within a hyperedge.
             // Create a temporary list to store the relations without the vertex.
             var tmp = ArrayList(Uuid).init(self.allocator);
+            defer tmp.deinit();
             for (hyperedge.relations.items) |v| {
                 if (v != vertex_id) {
                     try tmp.append(v);
@@ -612,8 +618,6 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             }
             // Swap the temporary list with the hyperedge relations.
             std.mem.swap(ArrayList(Uuid), &hyperedge.relations, &tmp);
-            // Release the temporary list.
-            tmp.deinit();
 
             const vertex = self.vertices.getPtr(vertex_id).?;
             const removed = vertex.relations.orderedRemove(hyperedge_id);
@@ -721,11 +725,11 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(from);
             try self.checkIfVertexExists(to);
 
-            var arena = std.heap.ArenaAllocator.init(self.allocator);
+            var arena = ArenaAllocator.init(self.allocator);
             defer arena.deinit();
 
             var came_from = CameFrom.init(arena.allocator());
-            var cost_so_far = std.AutoHashMap(Uuid, usize).init(arena.allocator());
+            var cost_so_far = AutoHashMap(Uuid, usize).init(arena.allocator());
             var frontier = Queue.init(arena.allocator(), &came_from);
 
             try came_from.put(from, null);
@@ -798,18 +802,19 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Reverse a hyperedge.
-        fn reverseHyperedge(self: *Self, hyperedge_id: Uuid) !void {
+        fn reverseHyperedge(self: *Self, hyperedge_id: Uuid) HyperZigError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             const tmp = try hyperedge.relations.toOwnedSlice();
             std.mem.reverse(Uuid, tmp);
             hyperedge.relations = ArrayList(Uuid).fromOwnedSlice(self.allocator, tmp);
+            debug("hyperedge {} reversed", .{hyperedge_id});
         }
 
         /// Join two or more hyperedges into one.
         /// All the vertices are moved to the first hyperedge.
-        fn joinHyperedges(self: *Self, hyperedges_ids: []const Uuid) !void {
+        fn joinHyperedges(self: *Self, hyperedges_ids: []const Uuid) HyperZigError!void {
             if (hyperedges_ids.len < 2) {
                 debug("at least two hyperedges must be provided, skipping", .{});
                 return HyperZigError.NotEnoughHyperedgesProvided;
@@ -842,6 +847,58 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 const removed = self.hyperedges.orderedRemove(h);
                 assert(removed);
             }
+
+            debug("hyperedges {any} joined into hyperedge {}", .{ hyperedges_ids, hyperedges_ids[0] });
+        }
+
+        /// Contract a hyperedge by merging its vertices into one.
+        /// The resulting vertex will be the last vertex in the hyperedge.
+        /// https://en.wikipedia.org/wiki/Edge_contraction
+        fn contractHyperedge(self: *Self, id: Uuid) HyperZigError!void {
+            try self.checkIfHyperedgeExists(id);
+
+            // Get the deduped vertices of the hyperedge.
+            const hyperedge = self.hyperedges.getPtr(id).?;
+            var arena = ArenaAllocator.init(self.allocator);
+            defer arena.deinit();
+            var deduped = AutoHashMap(Uuid, void).init(arena.allocator());
+            const vertices = hyperedge.relations.items;
+            for (vertices) |v| {
+                try deduped.put(v, {});
+            }
+
+            const last = vertices[vertices.len - 1];
+
+            // Get all vertices connecting to the ones from this hyperedge except the last one.
+            var it = deduped.keyIterator();
+            while (it.next()) |d| {
+                var result = try self.getVertexAdjacencyTo(d.*);
+                defer result.deinit();
+                var it_h = result.data.iterator();
+                while (it_h.next()) |kv| {
+                    var h = self.hyperedges.getPtr(kv.key_ptr.*).?;
+                    for (h.relations.items, 0..) |v, i| {
+                        // In each hyperedge, replace the current vertex with the last one.
+                        if (v == d.*) {
+                            h.relations.items[i] = last;
+                            // If the next vertex is also the last one, remove it.
+                            if (i + 1 < h.relations.items.len and h.relations.items[i + 1] == last) {
+                                _ = h.relations.orderedRemove(i + 1);
+                            }
+                        }
+                    }
+                }
+
+                // Delete the hyperedge from the vertex relations.
+                const vertex = self.vertices.getPtr(d.*).?;
+                const removed = vertex.relations.orderedRemove(id);
+                assert(removed);
+            }
+
+            // Delete the hyperedge itself.
+            hyperedge.relations.deinit();
+            const removed = self.hyperedges.orderedRemove(id);
+            assert(removed);
         }
     };
 }
@@ -1190,6 +1247,8 @@ test "delete hyperedge only" {
         const id = try graph.createVertex(.{});
         try arr.append(id);
     }
+    // Add the same vertex twice.
+    try arr.append(arr.items[arr.items.len - 1]);
     const ids = arr.items;
 
     try graph.appendVerticesToHyperedge(hyperedge_id, ids);
@@ -1217,6 +1276,8 @@ test "delete hyperedge and vertices" {
         const id = try graph.createVertex(.{});
         try arr.append(id);
     }
+    // Add the same vertex twice.
+    try arr.append(arr.items[arr.items.len - 1]);
     const ids = arr.items;
 
     try graph.appendVerticesToHyperedge(hyperedge_id, ids);
@@ -1685,4 +1746,21 @@ test "join hyperedges" {
         data.v_d, data.v_b,
     }, vertices);
     try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedge(data.h_c));
+}
+
+test "contract hyperedge" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    try graph.contractHyperedge(data.h_b);
+
+    const h_a = try graph.getHyperedgeVertices(data.h_a);
+    try expectEqualSlices(Uuid, &[_]Uuid{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_a }, h_a);
+
+    try expectError(HyperZigError.HyperedgeNotFound, graph.getHyperedgeVertices(data.h_b));
+
+    const h_c = try graph.getHyperedgeVertices(data.h_c);
+    try expectEqualSlices(Uuid, &[_]Uuid{ data.v_b, data.v_c, data.v_c, data.v_a, data.v_d, data.v_b }, h_c);
 }
