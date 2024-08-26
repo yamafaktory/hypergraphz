@@ -1764,3 +1764,15 @@ test "contract hyperedge" {
     const h_c = try graph.getHyperedgeVertices(data.h_c);
     try expectEqualSlices(Uuid, &[_]Uuid{ data.v_b, data.v_c, data.v_c, data.v_a, data.v_d, data.v_b }, h_c);
 }
+
+test "allocation failure" {
+    var failingAllocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    var graph = HyperZig(
+        Hyperedge,
+        Vertex,
+    ).init(failingAllocator.allocator());
+    defer graph.deinit();
+
+    _ = try graph.createVertex(.{});
+    try expectError(HyperZigError.OutOfMemory, graph.createHyperedge(.{}));
+}
