@@ -52,4 +52,14 @@ pub fn build(b: *std.Build) void {
     // - `zig build test -Doptimize=ReleaseFast` to run the unit tests in release-fast mode.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
+
+    // Generate docs step.
+    const docs_step = b.step("docs", "Emit docs");
+    const docs_install = b.addInstallDirectory(.{
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+        .source_dir = lib_unit_tests.getEmittedDocs(),
+    });
+    docs_step.dependOn(&docs_install.step);
+    b.default_step.dependOn(docs_step);
 }
