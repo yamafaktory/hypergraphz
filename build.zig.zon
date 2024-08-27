@@ -9,7 +9,6 @@
         },
     },
     .paths = .{
-        ".gitignore",
         "LICENSE",
         "README.md",
         "build.zig",
