@@ -24,3 +24,7 @@ const hyperzig = b.dependency("hyperzig", .{
 });
 exe.root_module.addImport("hyperzig", hyperzig.module("hyperzig"));
 ```
+
+## Documentation
+
+The latest online documentation can be found [here](https://yamafaktory.github.io/hyperzig/).
