@@ -16,9 +16,11 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
+    const root_source_file = b.path(HyperzigPath);
+
     // Export as module to be available via @import("hyperzig").
     _ = b.addModule("hyperzig", .{
-        .root_source_file = b.path(HyperzigPath),
+        .root_source_file = root_source_file,
         .target = target,
         .optimize = optimize,
     });
@@ -26,7 +28,7 @@ pub fn build(b: *std.Build) void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path(HyperzigPath),
+        .root_source_file = root_source_file,
         .target = target,
         .optimize = optimize,
         .filter = b.option([]const u8, "filter", "Filter strings for tests"),

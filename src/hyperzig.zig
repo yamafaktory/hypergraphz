@@ -1,6 +1,6 @@
 //! HyperZig is a directed hypergraph implementation in Zig.
 //! https://en.wikipedia.org/wiki/Hypergraph
-//! Each hyperedge can contain one (unary) or multiple vertices.
+//! Each hyperedge can contain zero, one (unary) or multiple vertices.
 //! Each hyperedge can contain vertices directed to themselves one or more times.
 
 const std = @import("std");
