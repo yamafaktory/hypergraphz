@@ -1,5 +1,7 @@
 # HyperZig - A Hypergraph Implementation in Zig
 
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/yamafaktory/hyperzig/ci.yml?branch=main&style=flat-square)
+
 HyperZig is a directed hypergraph implementation in Zig (https://en.wikipedia.org/wiki/Hypergraph):
 
 - Each hyperedge can contain zero, one (unary) or multiple vertices.
