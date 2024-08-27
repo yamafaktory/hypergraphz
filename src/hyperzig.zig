@@ -73,7 +73,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Create a new HyperZig instance.
-        fn init(allocator: Allocator) Self {
+        pub fn init(allocator: Allocator) Self {
             // We use an array list for hyperedges and an array hashmap for vertices.
             // The hyperedges can't be a hashmap since a hyperedge can contain the same vertex multiple times.
             const h = AutoArrayHashMap(Uuid, EntityArrayList(H)).init(allocator);
@@ -83,7 +83,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Deinit the HyperZig instance.
-        fn deinit(self: *Self) void {
+        pub fn deinit(self: *Self) void {
             // Deinit hyperedge relations.
             var h_it = self.hyperedges.iterator();
             while (h_it.next()) |kv| {
@@ -124,7 +124,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Create a new hyperedge.
-        fn createHyperedge(self: *Self, hyperedge: H) Allocator.Error!Uuid {
+        pub fn createHyperedge(self: *Self, hyperedge: H) Allocator.Error!Uuid {
             const id = uuid.v7.new();
             try self.hyperedges.put(id, .{ .relations = undefined, .data = hyperedge });
 
@@ -132,7 +132,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Create a new vertex.
-        fn createVertex(self: *Self, vertex: V) Allocator.Error!Uuid {
+        pub fn createVertex(self: *Self, vertex: V) Allocator.Error!Uuid {
             const id = uuid.v7.new();
             try self.vertices.put(id, .{ .relations = undefined, .data = vertex });
 
@@ -140,17 +140,17 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Count the number of hyperedges.
-        fn countHyperedges(self: *Self) usize {
+        pub fn countHyperedges(self: *Self) usize {
             return self.hyperedges.count();
         }
 
         /// Count the number of vertices.
-        fn countVertices(self: *Self) usize {
+        pub fn countVertices(self: *Self) usize {
             return self.vertices.count();
         }
 
         /// Check if an hyperedge exists.
-        fn checkIfHyperedgeExists(self: *Self, id: Uuid) HyperZigError!void {
+        pub fn checkIfHyperedgeExists(self: *Self, id: Uuid) HyperZigError!void {
             if (!self.hyperedges.contains(id)) {
                 debug("hyperedge {} not found", .{id});
 
@@ -159,7 +159,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Check if a vertex exists.
-        fn checkIfVertexExists(self: *Self, id: Uuid) HyperZigError!void {
+        pub fn checkIfVertexExists(self: *Self, id: Uuid) HyperZigError!void {
             if (!self.vertices.contains(id)) {
                 debug("vertex {} not found", .{id});
 
@@ -168,7 +168,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Get a hyperedge.
-        fn getHyperedge(self: *Self, id: Uuid) HyperZigError!H {
+        pub fn getHyperedge(self: *Self, id: Uuid) HyperZigError!H {
             try self.checkIfHyperedgeExists(id);
 
             const hyperedge = self.hyperedges.get(id).?;
@@ -177,7 +177,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Get a vertex.
-        fn getVertex(self: *Self, id: Uuid) HyperZigError!V {
+        pub fn getVertex(self: *Self, id: Uuid) HyperZigError!V {
             try self.checkIfVertexExists(id);
 
             const hyperedge = self.vertices.get(id).?;
@@ -186,14 +186,14 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Update a hyperedge.
-        fn updateHyperedge(self: *Self, id: Uuid, hyperedge: H) HyperZigError!void {
+        pub fn updateHyperedge(self: *Self, id: Uuid, hyperedge: H) HyperZigError!void {
             try self.checkIfHyperedgeExists(id);
 
             self.hyperedges.getPtr(id).?.data = hyperedge;
         }
 
         /// Update a vertex.
-        fn updateVertex(self: *Self, id: Uuid, vertex: V) HyperZigError!void {
+        pub fn updateVertex(self: *Self, id: Uuid, vertex: V) HyperZigError!void {
             try self.checkIfVertexExists(id);
 
             self.vertices.getPtr(id).?.data = vertex;
@@ -202,7 +202,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Get the indegree of a vertex.
         /// Note that a vertex can be directed to itself multiple times.
         /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
-        fn getVertexIndegree(self: *Self, id: Uuid) HyperZigError!usize {
+        pub fn getVertexIndegree(self: *Self, id: Uuid) HyperZigError!usize {
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.get(id).?;
@@ -231,7 +231,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Get the indegree of a vertex.
         /// Note that a vertex can be directed to itself multiple times.
         /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
-        fn getVertexOutdegree(self: *Self, id: Uuid) HyperZigError!usize {
+        pub fn getVertexOutdegree(self: *Self, id: Uuid) HyperZigError!usize {
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.get(id).?;
@@ -261,7 +261,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Struct containing the adjacents vertices as a hashmap whose keys are
         /// hyperedge ids and values are an array of adjacent vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
-        const AdjacencyResult = struct {
+        pub const AdjacencyResult = struct {
             data: AutoArrayHashMap(Uuid, ArrayList(Uuid)),
 
             fn deinit(self: *AdjacencyResult) void {
@@ -277,7 +277,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         };
         /// Get the adjacents vertices connected to a vertex.
         /// The caller is responsible for freeing the result memory with `denit`.
-        fn getVertexAdjacencyTo(self: *Self, id: Uuid) HyperZigError!AdjacencyResult {
+        pub fn getVertexAdjacencyTo(self: *Self, id: Uuid) HyperZigError!AdjacencyResult {
             try self.checkIfVertexExists(id);
 
             // We don't need to release the memory here since the caller will do it.
@@ -314,7 +314,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
         /// Get the adjacents vertices connected from a vertex.
         /// The caller is responsible for freeing the result memory with `denit`.
-        fn getVertexAdjacencyFrom(self: *Self, id: Uuid) HyperZigError!AdjacencyResult {
+        pub fn getVertexAdjacencyFrom(self: *Self, id: Uuid) HyperZigError!AdjacencyResult {
             try self.checkIfVertexExists(id);
 
             // We don't need to release the memory here since the caller will do it.
@@ -351,7 +351,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a hyperedge.
-        fn deleteHyperedge(self: *Self, id: Uuid, drop_vertices: bool) HyperZigError!void {
+        pub fn deleteHyperedge(self: *Self, id: Uuid, drop_vertices: bool) HyperZigError!void {
             try self.checkIfHyperedgeExists(id);
 
             const hyperedge = self.hyperedges.getPtr(id).?;
@@ -391,7 +391,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a vertex.
-        fn deleteVertex(self: *Self, id: Uuid) HyperZigError!void {
+        pub fn deleteVertex(self: *Self, id: Uuid) HyperZigError!void {
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.getPtr(id).?;
@@ -423,7 +423,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Get all vertices of a hyperedge as a slice.
-        fn getHyperedgeVertices(self: *Self, hyperedge_id: Uuid) HyperZigError![]Uuid {
+        pub fn getHyperedgeVertices(self: *Self, hyperedge_id: Uuid) HyperZigError![]Uuid {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
@@ -432,7 +432,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Get all hyperedges of a vertex as a slice.
-        fn getVertexHyperedges(self: *Self, vertex_id: Uuid) HyperZigError![]Uuid {
+        pub fn getVertexHyperedges(self: *Self, vertex_id: Uuid) HyperZigError![]Uuid {
             try self.checkIfVertexExists(vertex_id);
 
             const vertex = self.vertices.getPtr(vertex_id).?;
@@ -441,7 +441,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Append a vertex to a hyperedge.
-        fn appendVertexToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
+        pub fn appendVertexToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
@@ -463,7 +463,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Prepend a vertex to a hyperedge.
-        fn prependVertexToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
+        pub fn prependVertexToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
@@ -485,7 +485,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Insert a vertex into a hyperedge at a given index.
-        fn insertVertexIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid, index: usize) HyperZigError!void {
+        pub fn insertVertexIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid, index: usize) HyperZigError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
@@ -511,7 +511,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Append vertices to a hyperedge.
-        fn appendVerticesToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_ids: []const Uuid) HyperZigError!void {
+        pub fn appendVerticesToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_ids: []const Uuid) HyperZigError!void {
             if (vertex_ids.len == 0) {
                 debug("no vertices to append to hyperedge {}, skipping", .{hyperedge_id});
                 return;
@@ -540,7 +540,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Prepend vertices to a hyperedge.
-        fn prependVerticesToHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid) HyperZigError!void {
+        pub fn prependVerticesToHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid) HyperZigError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to prepend to hyperedge {}, skipping", .{hyperedge_id});
                 return;
@@ -569,7 +569,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Insert vertices into a hyperedge at a given index.
-        fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid, index: usize) HyperZigError!void {
+        pub fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid, index: usize) HyperZigError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to insert into hyperedge {}, skipping", .{hyperedge_id});
                 return HyperZigError.NoVerticesToInsert;
@@ -601,7 +601,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a vertex from a hyperedge.
-        fn deleteVertexFromHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
+        pub fn deleteVertexFromHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HyperZigError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
@@ -626,7 +626,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a vertex from a hyperedge at a given index.
-        fn deleteVertexByIndexFromHyperedge(self: *Self, hyperedge_id: Uuid, index: usize) HyperZigError!void {
+        pub fn deleteVertexByIndexFromHyperedge(self: *Self, hyperedge_id: Uuid, index: usize) HyperZigError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
@@ -653,7 +653,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
         /// Get the intersections between multiple hyperedges.
         /// This method returns an owned slice which must be freed by the caller.
-        fn getIntersections(self: *Self, hyperedges_ids: []const Uuid) HyperZigError![]const Uuid {
+        pub fn getIntersections(self: *Self, hyperedges_ids: []const Uuid) HyperZigError![]const Uuid {
             if (hyperedges_ids.len < 2) {
                 debug("at least two hyperedges must be provided, skipping", .{});
                 return HyperZigError.NotEnoughHyperedgesProvided;
@@ -711,7 +711,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
         /// Struct containing the shortest path as a list of vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
-        const ShortestPathResult = struct {
+        pub const ShortestPathResult = struct {
             data: ?ArrayList(Uuid),
 
             fn deinit(self: *ShortestPathResult) void {
@@ -721,7 +721,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         };
         /// Find the shortest path between two vertices using the A* algorithm.
         /// The caller is responsible for freeing the result memory with `deinit`.
-        fn findShortestPath(self: *Self, from: Uuid, to: Uuid) HyperZigError!ShortestPathResult {
+        pub fn findShortestPath(self: *Self, from: Uuid, to: Uuid) HyperZigError!ShortestPathResult {
             try self.checkIfVertexExists(from);
             try self.checkIfVertexExists(to);
 
@@ -802,7 +802,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Reverse a hyperedge.
-        fn reverseHyperedge(self: *Self, hyperedge_id: Uuid) HyperZigError!void {
+        pub fn reverseHyperedge(self: *Self, hyperedge_id: Uuid) HyperZigError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
@@ -814,7 +814,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
 
         /// Join two or more hyperedges into one.
         /// All the vertices are moved to the first hyperedge.
-        fn joinHyperedges(self: *Self, hyperedges_ids: []const Uuid) HyperZigError!void {
+        pub fn joinHyperedges(self: *Self, hyperedges_ids: []const Uuid) HyperZigError!void {
             if (hyperedges_ids.len < 2) {
                 debug("at least two hyperedges must be provided, skipping", .{});
                 return HyperZigError.NotEnoughHyperedgesProvided;
@@ -854,7 +854,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Contract a hyperedge by merging its vertices into one.
         /// The resulting vertex will be the last vertex in the hyperedge.
         /// https://en.wikipedia.org/wiki/Edge_contraction
-        fn contractHyperedge(self: *Self, id: Uuid) HyperZigError!void {
+        pub fn contractHyperedge(self: *Self, id: Uuid) HyperZigError!void {
             try self.checkIfHyperedgeExists(id);
 
             // Get the deduped vertices of the hyperedge.
@@ -899,6 +899,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             hyperedge.relations.deinit();
             const removed = self.hyperedges.orderedRemove(id);
             assert(removed);
+            debug("hyperedge {} contracted", .{id});
         }
     };
 }
