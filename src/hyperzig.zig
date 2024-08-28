@@ -185,6 +185,16 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             return hyperedge.data;
         }
 
+        /// Get all the hyperedges.
+        pub fn getAllHyperedges(self: *Self) []Uuid {
+            return self.hyperedges.keys();
+        }
+
+        /// Get all the vertices.
+        pub fn getAllVertices(self: *Self) []Uuid {
+            return self.vertices.keys();
+        }
+
         /// Update a hyperedge.
         pub fn updateHyperedge(self: *Self, id: Uuid, hyperedge: H) HyperZigError!void {
             try self.checkIfHyperedgeExists(id);
@@ -901,6 +911,12 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             assert(removed);
             debug("hyperedge {} contracted", .{id});
         }
+
+        /// Clear the hypergraph.
+        pub fn clear(self: *Self) void {
+            self.hyperedges.clearAndFree();
+            self.vertices.clearAndFree();
+        }
     };
 }
 
@@ -958,6 +974,18 @@ fn generateTestData(graph: *HyperZig(Hyperedge, Vertex)) !Data {
     };
 }
 
+test "allocation failure" {
+    var failingAllocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    var graph = HyperZig(
+        Hyperedge,
+        Vertex,
+    ).init(failingAllocator.allocator());
+    defer graph.deinit();
+
+    _ = try graph.createVertex(.{});
+    try expectError(HyperZigError.OutOfMemory, graph.createHyperedge(.{}));
+}
+
 test "create and get hyperedge" {
     var graph = try scaffold();
     defer graph.deinit();
@@ -980,6 +1008,26 @@ test "create and get vertex" {
 
     const vertex = try graph.getVertex(vertex_id);
     try expect(@TypeOf(vertex) == Vertex);
+}
+
+test "get all hyperedges" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    const hyperedges = graph.getAllHyperedges();
+    try expectEqualSlices(Uuid, &[_]Uuid{ data.h_a, data.h_b, data.h_c }, hyperedges);
+}
+
+test "get all vertices" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    const vertices = graph.getAllVertices();
+    try expectEqualSlices(Uuid, &[_]Uuid{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_e }, vertices);
 }
 
 test "append vertex to hyperedge" {
@@ -1766,14 +1814,13 @@ test "contract hyperedge" {
     try expectEqualSlices(Uuid, &[_]Uuid{ data.v_b, data.v_c, data.v_c, data.v_a, data.v_d, data.v_b }, h_c);
 }
 
-test "allocation failure" {
-    var failingAllocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
-    var graph = HyperZig(
-        Hyperedge,
-        Vertex,
-    ).init(failingAllocator.allocator());
+test "clear hypergraph" {
+    var graph = try scaffold();
     defer graph.deinit();
 
-    _ = try graph.createVertex(.{});
-    try expectError(HyperZigError.OutOfMemory, graph.createHyperedge(.{}));
+    graph.clear();
+    const hyperedges = graph.getAllHyperedges();
+    const vertices = graph.getAllVertices();
+    try expect(hyperedges.len == 0);
+    try expect(vertices.len == 0);
 }
