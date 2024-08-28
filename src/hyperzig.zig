@@ -15,6 +15,7 @@ const PriorityQueue = std.PriorityQueue;
 const Uuid = uuid.Uuid;
 const assert = std.debug.assert;
 const debug = std.log.debug;
+const window = std.mem.window;
 
 /// HyperZig errors.
 pub const HyperZigError = (error{
@@ -221,14 +222,10 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             while (it.next()) |kv| {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 if (hyperedge.relations.items.len > 0) {
-                    // Act as a window over the hyperedge relations.
-                    // Skip the first element since it has an indegree of 0.
-                    for (hyperedge.relations.items, 0..) |v, i| {
-                        if (i == 0) {
-                            continue;
-                        }
-
-                        if (v == id) {
+                    // Use a window iterator over the hyperedge relations.
+                    var wIt = window(u128, hyperedge.relations.items, 2, 1);
+                    while (wIt.next()) |v| {
+                        if (v[0] == id) {
                             indegree += 1;
                         }
                     }
@@ -250,15 +247,10 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             while (it.next()) |kv| {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 if (hyperedge.relations.items.len > 0) {
-                    // Act as a window over the hyperedge relations.
-                    // Skip the last element since it has an outdegree of 0.
-                    const last = hyperedge.relations.items.len - 1;
-                    for (hyperedge.relations.items, 0..) |v, i| {
-                        if (i == last) {
-                            break;
-                        }
-
-                        if (v == id) {
+                    // Use a window iterator over the hyperedge relations.
+                    var wIt = window(u128, hyperedge.relations.items, 2, 1);
+                    while (wIt.next()) |v| {
+                        if (v[1] == id) {
                             outdegree += 1;
                         }
                     }
@@ -298,15 +290,11 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 const hyperedge_id = kv.key_ptr.*;
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
-                    // Act as a window over the hyperedge relations.
-                    // Skip the first element since it has an indegree of 0.
-                    for (hyperedge.relations.items, 0..) |v, i| {
-                        if (i == 0) {
-                            continue;
-                        }
-
-                        if (v == id) {
-                            const adjacent = hyperedge.relations.items[i - 1];
+                    // Use a window iterator over the hyperedge relations.
+                    var wIt = window(u128, hyperedge.relations.items, 2, 1);
+                    while (wIt.next()) |v| {
+                        if (v[1] == id) {
+                            const adjacent = v[0];
                             const result = try adjacents.getOrPut(hyperedge_id);
                             // Initialize if not found.
                             if (!result.found_existing) {
@@ -335,16 +323,11 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 const hyperedge_id = kv.key_ptr.*;
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
-                    // Act as a window over the hyperedge relations.
-                    // Skip the last element since it has an outdegree of 0.
-                    const last = hyperedge.relations.items.len - 1;
-                    for (hyperedge.relations.items, 0..) |v, i| {
-                        if (i == last) {
-                            continue;
-                        }
-
-                        if (v == id) {
-                            const adjacent = hyperedge.relations.items[i + 1];
+                    // Use a window iterator over the hyperedge relations.
+                    var wIt = window(u128, hyperedge.relations.items, 2, 1);
+                    while (wIt.next()) |v| {
+                        if (v[0] == id) {
+                            const adjacent = v[1];
                             const result = try adjacents.getOrPut(hyperedge_id);
                             // Initialize if not found.
                             if (!result.found_existing) {
