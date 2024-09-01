@@ -73,12 +73,30 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             };
         }
 
+        /// Configuration for the HyperZig instance.
+        const HyperZigConfig = struct {
+            /// The initial capacity of the hyperedges array hashmap.
+            hyperedgeCapacity: ?usize = null,
+            /// The initial capacity of the vertices array hashmap.
+            vertexCapacity: ?usize = null,
+        };
+
         /// Create a new HyperZig instance.
-        pub fn init(allocator: Allocator) Self {
+        pub fn init(allocator: Allocator, config: HyperZigConfig) HyperZigError!Self {
             // We use an array list for hyperedges and an array hashmap for vertices.
             // The hyperedges can't be a hashmap since a hyperedge can contain the same vertex multiple times.
-            const h = AutoArrayHashMap(Uuid, EntityArrayList(H)).init(allocator);
-            const v = AutoArrayHashMap(Uuid, EntityArrayHashMap(V)).init(allocator);
+            var h = AutoArrayHashMap(Uuid, EntityArrayList(H)).init(allocator);
+            var v = AutoArrayHashMap(Uuid, EntityArrayHashMap(V)).init(allocator);
+
+            if (config.hyperedgeCapacity) |c| {
+                try h.ensureTotalCapacity(c);
+                assert(h.capacity() >= c);
+            }
+
+            if (config.vertexCapacity) |c| {
+                try v.ensureTotalCapacity(c);
+                assert(v.capacity() >= c);
+            }
 
             return .{ .allocator = allocator, .hyperedges = h, .vertices = v };
         }
@@ -913,10 +931,10 @@ const Vertex = struct { purr: bool = false };
 fn scaffold() HyperZigError!HyperZig(Hyperedge, Vertex) {
     std.testing.log_level = .debug;
 
-    const graph = HyperZig(
+    const graph = try HyperZig(
         Hyperedge,
         Vertex,
-    ).init(std.testing.allocator);
+    ).init(std.testing.allocator, .{});
 
     return graph;
 }
@@ -959,10 +977,10 @@ fn generateTestData(graph: *HyperZig(Hyperedge, Vertex)) !Data {
 
 test "allocation failure" {
     var failingAllocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
-    var graph = HyperZig(
+    var graph = try HyperZig(
         Hyperedge,
         Vertex,
-    ).init(failingAllocator.allocator());
+    ).init(failingAllocator.allocator(), .{});
     defer graph.deinit();
 
     _ = try graph.createVertex(.{});
