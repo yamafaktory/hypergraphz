@@ -73,8 +73,8 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             };
         }
 
-        /// Configuration for the HyperZig instance.
-        const HyperZigConfig = struct {
+        /// Configuration struct for the HyperZig instance.
+        pub const HyperZigConfig = struct {
             /// The initial capacity of the hyperedges array hashmap.
             hyperedgeCapacity: ?usize = null,
             /// The initial capacity of the vertices array hashmap.
