@@ -1,5 +1,5 @@
 const std = @import("std");
-const HyperzigPath = "src/hyperzig.zig";
+const HyperZigPath = "src/hyperzig.zig";
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -16,7 +16,7 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const root_source_file = b.path(HyperzigPath);
+    const root_source_file = b.path(HyperZigPath);
 
     // Export as module to be available via @import("hyperzig").
     _ = b.addModule("hyperzig", .{
@@ -40,13 +40,6 @@ pub fn build(b: *std.Build) void {
     // https://ziggit.dev/t/how-to-enable-more-logging-and-disable-caching-with-zig-build-test/2654/11
     run_lib_unit_tests.has_side_effects = true;
 
-    if (b.lazyDependency("uuid", .{
-        .target = target,
-        .optimize = optimize,
-    })) |dep| {
-        lib_unit_tests.root_module.addImport("uuid", dep.module("uuid"));
-    }
-
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
@@ -64,4 +57,21 @@ pub fn build(b: *std.Build) void {
     });
     docs_step.dependOn(&docs_install.step);
     b.default_step.dependOn(docs_step);
+
+    // Check step used by the zls configuration.
+    const check_step = b.addTest(.{
+        .root_source_file = root_source_file,
+        .target = target,
+        .optimize = .Debug,
+    });
+    const check = b.step("check", "Check if HyperZig compiles");
+    check.dependOn(&check_step.step);
+
+    if (b.lazyDependency("uuid", .{
+        .target = target,
+        .optimize = optimize,
+    })) |dep| {
+        lib_unit_tests.root_module.addImport("uuid", dep.module("uuid"));
+        check_step.root_module.addImport("uuid", dep.module("uuid"));
+    }
 }
