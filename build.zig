@@ -27,14 +27,14 @@ pub fn build(b: *std.Build) void {
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
-    const lib_unit_tests = b.addTest(.{
+    const unit_tests = b.addTest(.{
         .root_source_file = root_source_file,
         .target = target,
         .optimize = optimize,
         .filter = b.option([]const u8, "filter", "Filter strings for tests"),
     });
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const run_lib_unit_tests = b.addRunArtifact(unit_tests);
 
     // Disable cache for unit tests to get logs.
     // https://ziggit.dev/t/how-to-enable-more-logging-and-disable-caching-with-zig-build-test/2654/11
@@ -53,25 +53,41 @@ pub fn build(b: *std.Build) void {
     const docs_install = b.addInstallDirectory(.{
         .install_dir = .prefix,
         .install_subdir = "docs",
-        .source_dir = lib_unit_tests.getEmittedDocs(),
+        .source_dir = unit_tests.getEmittedDocs(),
     });
     docs_step.dependOn(&docs_install.step);
     b.default_step.dependOn(docs_step);
 
     // Check step used by the zls configuration.
-    const check_step = b.addTest(.{
+    const check_step = b.step("check", "Check if HyperZig compiles");
+    const check = b.addTest(.{
         .root_source_file = root_source_file,
         .target = target,
         .optimize = .Debug,
     });
-    const check = b.step("check", "Check if HyperZig compiles");
-    check.dependOn(&check_step.step);
+    check_step.dependOn(&check.step);
+
+    // Bench step.
+    const bench_step = b.step("bench", "Run benchmarks");
+    const bench_exe = b.addExecutable(.{
+        .name = "bench",
+        .root_source_file = b.path("src/bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    const bench_run = b.addRunArtifact(bench_exe);
+    if (b.args) |args| {
+        bench_run.addArgs(args);
+    }
+    bench_step.dependOn(&bench_run.step);
+    b.default_step.dependOn(bench_step);
 
     if (b.lazyDependency("uuid", .{
         .target = target,
         .optimize = optimize,
     })) |dep| {
-        lib_unit_tests.root_module.addImport("uuid", dep.module("uuid"));
-        check_step.root_module.addImport("uuid", dep.module("uuid"));
+        unit_tests.root_module.addImport("uuid", dep.module("uuid"));
+        check.root_module.addImport("uuid", dep.module("uuid"));
+        bench_exe.root_module.addImport("uuid", dep.module("uuid"));
     }
 }
