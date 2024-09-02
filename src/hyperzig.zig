@@ -76,9 +76,9 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         /// Configuration struct for the HyperZig instance.
         pub const HyperZigConfig = struct {
             /// The initial capacity of the hyperedges array hashmap.
-            hyperedgeCapacity: ?usize = null,
+            hyperedges_capacity: ?usize = null,
             /// The initial capacity of the vertices array hashmap.
-            vertexCapacity: ?usize = null,
+            vertices_capacity: ?usize = null,
         };
 
         /// Create a new HyperZig instance.
@@ -88,12 +88,12 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             var h = AutoArrayHashMap(Uuid, EntityArrayList(H)).init(allocator);
             var v = AutoArrayHashMap(Uuid, EntityArrayHashMap(V)).init(allocator);
 
-            if (config.hyperedgeCapacity) |c| {
+            if (config.hyperedges_capacity) |c| {
                 try h.ensureTotalCapacity(c);
                 assert(h.capacity() >= c);
             }
 
-            if (config.vertexCapacity) |c| {
+            if (config.vertices_capacity) |c| {
                 try v.ensureTotalCapacity(c);
                 assert(v.capacity() >= c);
             }
@@ -143,17 +143,33 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
         }
 
         /// Create a new hyperedge.
-        pub fn createHyperedge(self: *Self, hyperedge: H) Allocator.Error!Uuid {
+        pub fn createHyperedge(self: *Self, hyperedge: H) HyperZigError!Uuid {
             const id = uuid.v7.new();
             try self.hyperedges.put(id, .{ .relations = undefined, .data = hyperedge });
 
             return id;
         }
 
+        /// Create a new hyperedge assuming there is enough capacity.
+        pub fn createHyperedgeAssumeCapacity(self: *Self, hyperedge: H) Uuid {
+            const id = uuid.v7.new();
+            self.hyperedges.putAssumeCapacity(id, .{ .relations = undefined, .data = hyperedge });
+
+            return id;
+        }
+
         /// Create a new vertex.
-        pub fn createVertex(self: *Self, vertex: V) Allocator.Error!Uuid {
+        pub fn createVertex(self: *Self, vertex: V) HyperZigError!Uuid {
             const id = uuid.v7.new();
             try self.vertices.put(id, .{ .relations = undefined, .data = vertex });
+
+            return id;
+        }
+
+        /// Create a new vertex assuming there is enough capacity.
+        pub fn createVertexAssumeCapacity(self: *Self, vertex: V) Uuid {
+            const id = uuid.v7.new();
+            self.vertices.putAssumeCapacity(id, .{ .relations = undefined, .data = vertex });
 
             return id;
         }
@@ -934,7 +950,7 @@ fn scaffold() HyperZigError!HyperZig(Hyperedge, Vertex) {
     const graph = try HyperZig(
         Hyperedge,
         Vertex,
-    ).init(std.testing.allocator, .{});
+    ).init(std.testing.allocator, .{ .vertices_capacity = 5, .hyperedges_capacity = 3 });
 
     return graph;
 }
@@ -950,17 +966,17 @@ const Data = struct {
     h_c: Uuid,
 };
 fn generateTestData(graph: *HyperZig(Hyperedge, Vertex)) !Data {
-    const v_a = try graph.createVertex(.{});
-    const v_b = try graph.createVertex(.{});
-    const v_c = try graph.createVertex(.{});
-    const v_d = try graph.createVertex(.{});
-    const v_e = try graph.createVertex(.{});
+    const v_a = graph.createVertexAssumeCapacity(.{});
+    const v_b = graph.createVertexAssumeCapacity(.{});
+    const v_c = graph.createVertexAssumeCapacity(.{});
+    const v_d = graph.createVertexAssumeCapacity(.{});
+    const v_e = graph.createVertexAssumeCapacity(.{});
 
-    const h_a = try graph.createHyperedge(.{});
+    const h_a = graph.createHyperedgeAssumeCapacity(.{});
     try graph.appendVerticesToHyperedge(h_a, &.{ v_a, v_b, v_c, v_d, v_e });
-    const h_b = try graph.createHyperedge(.{});
+    const h_b = graph.createHyperedgeAssumeCapacity(.{});
     try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
-    const h_c = try graph.createHyperedge(.{});
+    const h_c = graph.createHyperedgeAssumeCapacity(.{});
     try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
 
     return .{

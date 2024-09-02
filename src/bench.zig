@@ -1,11 +1,15 @@
 //! Benchmarks for HyperZig.
 
 const std = @import("std");
-const HyperZig = @import("hyperzig.zig").HyperZig;
+const uuid = @import("uuid");
+const hyperzig = @import("hyperzig.zig");
 
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
+const HyperZig = hyperzig.HyperZig;
 const Timer = std.time.Timer;
+const Uuid = uuid.Uuid;
 const comptimePrint = std.fmt.comptimePrint;
 const fmtDuration = std.fmt.fmtDuration;
 const getStdOut = std.io.getStdOut;
@@ -26,7 +30,7 @@ const Bench = struct {
         const graph = try HyperZig(
             Hyperedge,
             Vertex,
-        ).init(allocator, .{});
+        ).init(allocator, .{ .vertices_capacity = 1_000_000, .hyperedges_capacity = 1_000_000 });
         const msg = comptime comptimePrint("{s}...\n", .{name});
         try stdout.print(msg, .{});
         var timer = try Timer.start();
@@ -34,8 +38,11 @@ const Bench = struct {
         return .{ .timer = timer, .start = timer.lap(), .stdout = stdout, .graph = graph };
     }
 
-    pub fn deinit(self: *Self) !void {
-        try self.stdout.print("Total duration: {s}\n", .{fmtDuration(self.timer.read() - self.start)});
+    pub fn end(self: *Self) !void {
+        try self.stdout.print("Total duration: {}\n", .{fmtDuration(self.timer.read() - self.start)});
+    }
+
+    pub fn deinit(self: *Self) void {
         self.graph.deinit();
     }
 };
@@ -46,15 +53,32 @@ pub fn main() !void {
     const stdout = getStdOut().writer();
 
     {
-        var bench = try Bench.init(allocator, stdout, "generate 1_000 hyperedges with 1_000 vertices each");
+        var bench = try Bench.init(allocator, stdout, "generate 1_000 hyperedges with 1_000 vertices each atomically");
         for (0..1_000) |_| {
             const h = try bench.graph.createHyperedge(.{});
-
             for (0..1_000) |_| {
                 const v = try bench.graph.createVertex(.{});
                 try bench.graph.appendVertexToHyperedge(h, v);
             }
         }
-        try bench.deinit();
+        try bench.end();
+        defer bench.deinit();
+    }
+
+    {
+        var vertices = try ArrayList(Uuid).initCapacity(allocator, 1_000);
+        defer vertices.deinit();
+        var bench = try Bench.init(allocator, stdout, "generate 1_000 hyperedges with 1_000 vertices each in batches");
+        for (0..1_000) |_| {
+            vertices.clearRetainingCapacity();
+            const h = bench.graph.createHyperedgeAssumeCapacity(.{});
+            for (0..1_000) |_| {
+                const id = bench.graph.createVertexAssumeCapacity(.{});
+                try vertices.append(id);
+            }
+            try bench.graph.appendVerticesToHyperedge(h, vertices.items);
+        }
+        try bench.end();
+        defer bench.deinit();
     }
 }
