@@ -30,7 +30,7 @@ const Bench = struct {
         const graph = try HyperZig(
             Hyperedge,
             Vertex,
-        ).init(allocator, .{ .vertices_capacity = 1_000_000, .hyperedges_capacity = 1_000_000 });
+        ).init(allocator, .{ .vertices_capacity = 1_000_000, .hyperedges_capacity = 1_000 });
         const msg = comptime comptimePrint("{s}...\n", .{name});
         try stdout.print(msg, .{});
         var timer = try Timer.start();
