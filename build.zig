@@ -68,19 +68,19 @@ pub fn build(b: *std.Build) void {
     check_step.dependOn(&check.step);
 
     // Bench step.
-    const bench_step = b.step("bench", "Run benchmarks");
-    const bench_exe = b.addExecutable(.{
-        .name = "bench",
-        .root_source_file = b.path("src/bench.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    const bench_run = b.addRunArtifact(bench_exe);
-    if (b.args) |args| {
-        bench_run.addArgs(args);
-    }
-    bench_step.dependOn(&bench_run.step);
-    b.default_step.dependOn(bench_step);
+    // const bench_step = b.step("bench", "Run benchmarks");
+    // const bench_exe = b.addExecutable(.{
+    //     .name = "bench",
+    //     .root_source_file = b.path("src/bench.zig"),
+    //     .target = target,
+    //     .optimize = .ReleaseFast,
+    // });
+    // const bench_run = b.addRunArtifact(bench_exe);
+    // if (b.args) |args| {
+    //     bench_run.addArgs(args);
+    // }
+    // bench_step.dependOn(&bench_run.step);
+    // b.default_step.dependOn(bench_step);
 
     if (b.lazyDependency("uuid", .{
         .target = target,
@@ -88,6 +88,6 @@ pub fn build(b: *std.Build) void {
     })) |dep| {
         unit_tests.root_module.addImport("uuid", dep.module("uuid"));
         check.root_module.addImport("uuid", dep.module("uuid"));
-        bench_exe.root_module.addImport("uuid", dep.module("uuid"));
+        // bench_exe.root_module.addImport("uuid", dep.module("uuid"));
     }
 }
