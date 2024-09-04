@@ -49,11 +49,17 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lib_unit_tests.step);
 
     // Generate docs step.
+    const lib = b.addStaticLibrary(.{
+        .name = "hyperzig",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = root_source_file,
+    });
     const docs_step = b.step("docs", "Emit docs");
     const docs_install = b.addInstallDirectory(.{
         .install_dir = .prefix,
         .install_subdir = "docs",
-        .source_dir = unit_tests.getEmittedDocs(),
+        .source_dir = lib.getEmittedDocs(),
     });
     docs_step.dependOn(&docs_install.step);
     b.default_step.dependOn(docs_step);

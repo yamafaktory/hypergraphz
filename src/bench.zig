@@ -1,3 +1,5 @@
+//! Benchmarks for HyperZig.
+
 const std = @import("std");
 const uuid = @import("uuid");
 const hyperzig = @import("hyperzig.zig");
