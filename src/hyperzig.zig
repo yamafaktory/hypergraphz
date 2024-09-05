@@ -257,7 +257,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
-                    var wIt = window(u128, hyperedge.relations.items, 2, 1);
+                    var wIt = window(Uuid, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
                         if (v[0] == id) {
                             indegree += 1;
@@ -282,7 +282,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
-                    var wIt = window(u128, hyperedge.relations.items, 2, 1);
+                    var wIt = window(Uuid, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
                         if (v[1] == id) {
                             outdegree += 1;
@@ -325,7 +325,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
-                    var wIt = window(u128, hyperedge.relations.items, 2, 1);
+                    var wIt = window(Uuid, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
                         if (v[1] == id) {
                             const adjacent = v[0];
@@ -358,7 +358,7 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
-                    var wIt = window(u128, hyperedge.relations.items, 2, 1);
+                    var wIt = window(Uuid, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
                         if (v[0] == id) {
                             const adjacent = v[1];
