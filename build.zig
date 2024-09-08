@@ -1,5 +1,5 @@
 const std = @import("std");
-const HyperZigPath = "src/hyperzig.zig";
+const HypergraphZPath = "src/hypergraphz.zig";
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -16,10 +16,10 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const root_source_file = b.path(HyperZigPath);
+    const root_source_file = b.path(HypergraphZPath);
 
-    // Export as module to be available via @import("hyperzig").
-    _ = b.addModule("hyperzig", .{
+    // Export as module to be available via @import("hypergraphz").
+    _ = b.addModule("hypergraphz", .{
         .root_source_file = root_source_file,
         .target = target,
         .optimize = optimize,
@@ -50,7 +50,7 @@ pub fn build(b: *std.Build) void {
 
     // Generate docs step.
     const lib = b.addStaticLibrary(.{
-        .name = "hyperzig",
+        .name = "hypergraphz",
         .target = target,
         .optimize = optimize,
         .root_source_file = root_source_file,
@@ -65,7 +65,7 @@ pub fn build(b: *std.Build) void {
     b.default_step.dependOn(docs_step);
 
     // Check step used by the zls configuration.
-    const check_step = b.step("check", "Check if HyperZig compiles");
+    const check_step = b.step("check", "Check if HypergraphZ compiles");
     const check = b.addTest(.{
         .root_source_file = root_source_file,
         .target = target,

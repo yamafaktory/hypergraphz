@@ -1,13 +1,13 @@
-//! Benchmarks for HyperZig.
+//! Benchmarks for HypergraphZ.
 
 const std = @import("std");
 const uuid = @import("uuid");
-const hyperzig = @import("hyperzig.zig");
+const hypergraphz = @import("hypergraphz.zig");
 
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
-const HyperZig = hyperzig.HyperZig;
+const HypergraphZ = hypergraphz.HypergraphZ;
 const Timer = std.time.Timer;
 const Uuid = uuid.Uuid;
 const comptimePrint = std.fmt.comptimePrint;
@@ -21,13 +21,13 @@ const Vertex = struct {};
 const Bench = struct {
     const Self = @This();
 
-    graph: HyperZig(Hyperedge, Vertex),
+    graph: HypergraphZ(Hyperedge, Vertex),
     start: u64,
     stdout: Writer,
     timer: Timer,
 
     pub fn init(allocator: Allocator, stdout: Writer, comptime name: []const u8) !Self {
-        const graph = try HyperZig(
+        const graph = try HypergraphZ(
             Hyperedge,
             Vertex,
         ).init(allocator, .{ .vertices_capacity = 1_000_000, .hyperedges_capacity = 1_000 });

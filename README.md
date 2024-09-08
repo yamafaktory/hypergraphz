@@ -1,30 +1,30 @@
-# HyperZig - A Hypergraph Implementation in Zig
+# HypergraphZ - A Hypergraph Implementation in Zig
 
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/yamafaktory/hyperzig/ci.yml?branch=main&style=flat-square)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/yamafaktory/hypergraphz/ci.yml?branch=main&style=flat-square)
 
-HyperZig is a directed hypergraph implementation in Zig (https://en.wikipedia.org/wiki/Hypergraph):
+HypergraphZ is a directed hypergraph implementation in Zig (https://en.wikipedia.org/wiki/Hypergraph):
 
 - Each hyperedge can contain zero, one (unary) or multiple vertices.
 - Each hyperedge can contain vertices directed to themselves one or more times.
 
 ## Usage
 
-Add `hyperzig` as a dependency to your `build.zig.zon`:
+Add `hypergraphz` as a dependency to your `build.zig.zon`:
 
 ```sh
-zig fetch --save https://github.com/yamafaktory/hyperzig/archive/<commit-hash>.tar.gz
+zig fetch --save https://github.com/yamafaktory/hypergraphz/archive/<commit-hash>.tar.gz
 ```
 
-Add `hyperzig` as a dependency to your `build.zig`:
+Add `hypergraphz` as a dependency to your `build.zig`:
 
 ```zig
-const hyperzig = b.dependency("hyperzig", .{
+const hypergraphz = b.dependency("hypergraphz", .{
     .target = target,
     .optimize = optimize,
 });
-exe.root_module.addImport("hyperzig", hyperzig.module("hyperzig"));
+exe.root_module.addImport("hypergraphz", hypergraphz.module("hypergraphz"));
 ```
 
 ## Documentation
 
-The latest online documentation can be found [here](https://yamafaktory.github.io/hyperzig/).
+The latest online documentation can be found [here](https://yamafaktory.github.io/hypergraphz/).
