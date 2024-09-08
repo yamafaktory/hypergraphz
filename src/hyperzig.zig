@@ -934,6 +934,44 @@ pub fn HyperZig(comptime H: type, comptime V: type) type {
             self.hyperedges.clearAndFree();
             self.vertices.clearAndFree();
         }
+
+        /// Struct containing the hyperedges as a hashset whose keys are
+        /// hyperedge ids.
+        /// The caller is responsible for freeing the memory with `deinit`.
+        pub const HyperedgesResult = struct {
+            data: AutoArrayHashMap(Uuid, void),
+
+            fn deinit(self: *HyperedgesResult) void {
+                self.data.deinit();
+                self.* = undefined;
+            }
+        };
+        /// Get all the hyperedges connecting two vertices.
+        /// This method returns an owned slice which must be freed by the caller.
+        pub fn getHyperedgesConnecting(self: *Self, first_vertex_id: Uuid, second_vertex_id: Uuid) HyperZigError!HyperedgesResult {
+            try self.checkIfVertexExists(first_vertex_id);
+            try self.checkIfVertexExists(second_vertex_id);
+
+            const eq = first_vertex_id == second_vertex_id;
+            const first_vertex = self.vertices.get(first_vertex_id).?;
+            var it = first_vertex.relations.iterator();
+            var deduped = AutoArrayHashMap(Uuid, void).init(self.allocator);
+            while (it.next()) |kv| {
+                const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
+                var found_occurences: usize = 0;
+                for (hyperedge.relations.items) |v| {
+                    if (v == second_vertex_id) {
+                        found_occurences += 1;
+                    }
+                }
+                // We need to take care of potential self-loops.
+                if ((eq and found_occurences > 1) or (!eq and found_occurences > 0)) {
+                    try deduped.put(kv.key_ptr.*, {});
+                }
+            }
+
+            return .{ .data = deduped };
+        }
     };
 }
 
@@ -1840,4 +1878,92 @@ test "clear hypergraph" {
     const vertices = graph.getAllVertices();
     try expect(hyperedges.len == 0);
     try expect(vertices.len == 0);
+}
+
+test "get hyperedges connecting vertices" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    try expectError(HyperZigError.VertexNotFound, graph.getHyperedgesConnecting(1, data.v_b));
+    try expectError(HyperZigError.VertexNotFound, graph.getHyperedgesConnecting(data.v_a, 1));
+
+    {
+        var result = try graph.getHyperedgesConnecting(data.v_a, data.v_b);
+        defer result.deinit();
+        var i: usize = 0;
+        var it = result.data.iterator();
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_a);
+            } else if (i == 1) {
+                try expect(kv.key_ptr.* == data.h_c);
+            }
+            i += 1;
+        }
+        try expect(i == 2);
+    }
+
+    {
+        var result = try graph.getHyperedgesConnecting(data.v_b, data.v_b);
+        defer result.deinit();
+        var i: usize = 0;
+        var it = result.data.iterator();
+
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_c);
+            }
+            i += 1;
+        }
+        try expect(i == 1);
+    }
+
+    {
+        var result = try graph.getHyperedgesConnecting(data.v_b, data.v_c);
+        defer result.deinit();
+        var i: usize = 0;
+        var it = result.data.iterator();
+
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_a);
+            } else if (i == 1) {
+                try expect(kv.key_ptr.* == data.h_c);
+            }
+            i += 1;
+        }
+        try expect(i == 2);
+    }
+
+    {
+        var result = try graph.getHyperedgesConnecting(data.v_c, data.v_c);
+        defer result.deinit();
+        var i: usize = 0;
+        var it = result.data.iterator();
+
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_c);
+            }
+            i += 1;
+        }
+        try expect(i == 1);
+    }
+
+    {
+        var result = try graph.getHyperedgesConnecting(data.v_e, data.v_e);
+        defer result.deinit();
+        var i: usize = 0;
+        var it = result.data.iterator();
+
+        while (it.next()) |kv| {
+            if (i == 0) {
+                try expect(kv.key_ptr.* == data.h_b);
+            }
+            i += 1;
+        }
+        try expect(i == 1);
+    }
 }
