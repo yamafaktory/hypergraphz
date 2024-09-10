@@ -11,6 +11,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
 const AutoHashMap = std.AutoHashMap;
 const AutoArrayHashMap = std.array_hash_map.AutoArrayHashMap;
+const MultiArrayList = std.MultiArrayList;
 const PriorityQueue = std.PriorityQueue;
 const Uuid = uuid.Uuid;
 const assert = std.debug.assert;
@@ -971,6 +972,85 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             return .{ .data = deduped };
+        }
+
+        /// Tuple struct containing a vertex id and its hyperedge id as an endpoint.
+        pub const EndpointTuple = struct {
+            hyperedge_id: Uuid,
+            vertex_id: Uuid,
+        };
+        /// Struct containing the endpoints - initial and terminal - as two
+        /// multi array lists of `EndpointTuple`.
+        /// The caller is responsible for freeing the memory with `deinit`.
+        pub const EndpointsResult = struct {
+            allocator: Allocator,
+            initial: MultiArrayList(EndpointTuple),
+            terminal: MultiArrayList(EndpointTuple),
+
+            fn init(allocator: Allocator) EndpointsResult {
+                const initial = (MultiArrayList(EndpointTuple)){};
+                const terminal = (MultiArrayList(EndpointTuple)){};
+
+                return .{
+                    .allocator = allocator,
+                    .initial = initial,
+                    .terminal = terminal,
+                };
+            }
+
+            fn deinit(self: *EndpointsResult) void {
+                self.initial.deinit(self.allocator);
+                self.terminal.deinit(self.allocator);
+                self.* = undefined;
+            }
+        };
+        /// Get all the initial and terminal endpoints of all the hyperedges.
+        pub fn getEndpoints(self: *Self) HypergraphZError!EndpointsResult {
+            var result = EndpointsResult.init(self.allocator);
+            var it = self.hyperedges.iterator();
+            while (it.next()) |kv| {
+                const hyperedge = kv.value_ptr;
+                if (hyperedge.relations.items.len == 0) continue;
+                const hyperedge_id = kv.key_ptr.*;
+                const vertices = hyperedge.relations.items;
+                try result.initial.append(self.allocator, .{ .hyperedge_id = hyperedge_id, .vertex_id = vertices[0] });
+                try result.terminal.append(self.allocator, .{ .hyperedge_id = hyperedge_id, .vertex_id = vertices[vertices.len - 1] });
+            }
+
+            debug("{} initial and {} terminal endpoints found", .{ result.initial.len, result.terminal.len });
+            return result;
+        }
+
+        /// Get the orphan hyperedges.
+        /// The caller is responsible for freeing the memory with `deinit`.
+        pub fn getOrphanHyperedges(self: *Self) HypergraphZError![]const Uuid {
+            var orphans = ArrayList(Uuid).init(self.allocator);
+            var it = self.hyperedges.iterator();
+            while (it.next()) |kv| {
+                const vertices = kv.value_ptr.relations;
+                if (vertices.items.len == 0) {
+                    try orphans.append(kv.key_ptr.*);
+                }
+            }
+
+            debug("{} orphan hyperedges found", .{orphans.items.len});
+            return orphans.toOwnedSlice();
+        }
+
+        /// Get the orphan vertices.
+        /// The caller is responsible for freeing the memory with `deinit`.
+        pub fn getOrphanVertices(self: *Self) HypergraphZError![]const Uuid {
+            var orphans = ArrayList(Uuid).init(self.allocator);
+            var it = self.vertices.iterator();
+            while (it.next()) |kv| {
+                const hyperedges = kv.value_ptr.relations;
+                if (hyperedges.count() == 0) {
+                    try orphans.append(kv.key_ptr.*);
+                }
+            }
+
+            debug("{} orphan vertices found", .{orphans.items.len});
+            return orphans.toOwnedSlice();
         }
     };
 }
@@ -1966,4 +2046,68 @@ test "get hyperedges connecting vertices" {
         }
         try expect(i == 1);
     }
+}
+
+test "get endpoints" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    const data = try generateTestData(&graph);
+
+    var result = try graph.getEndpoints();
+    defer result.deinit();
+
+    const initial = result.initial.slice();
+    try expect(initial.len == 3);
+    for (initial.items(.vertex_id), initial.items(.hyperedge_id), 0..) |v, h, i| {
+        if (i == 0) {
+            try expect(data.v_a == v);
+            try expect(data.h_a == h);
+        } else if (i == 1) {
+            try expect(data.v_e == v);
+            try expect(data.h_b == h);
+        } else if (i == 2) {
+            try expect(data.v_b == v);
+            try expect(data.h_c == h);
+        }
+    }
+
+    const terminal = result.terminal.slice();
+    try expect(terminal.len == 3);
+    for (terminal.items(.vertex_id), terminal.items(.hyperedge_id), 0..) |v, h, i| {
+        if (i == 0) {
+            try expect(data.v_e == v);
+            try expect(data.h_a == h);
+        } else if (i == 1) {
+            try expect(data.v_a == v);
+            try expect(data.h_b == h);
+        } else if (i == 2) {
+            try expect(data.v_b == v);
+            try expect(data.h_c == h);
+        }
+    }
+}
+
+test "get orphan hyperedges" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    _ = try generateTestData(&graph);
+
+    const orphan = try graph.createHyperedge(.{});
+    const orphans = try graph.getOrphanHyperedges();
+    defer graph.allocator.free(orphans);
+    try expectEqualSlices(Uuid, &[_]Uuid{orphan}, orphans);
+}
+
+test "get orphan vertices" {
+    var graph = try scaffold();
+    defer graph.deinit();
+
+    _ = try generateTestData(&graph);
+
+    const orphan = try graph.createVertex(.{});
+    const orphans = try graph.getOrphanVertices();
+    defer graph.allocator.free(orphans);
+    try expectEqualSlices(Uuid, &[_]Uuid{orphan}, orphans);
 }
