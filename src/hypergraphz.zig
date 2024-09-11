@@ -159,6 +159,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             return id;
         }
 
+        /// Reserve capacity for the insertion of new hyperedges.
+        pub fn reserveHyperedges(self: *Self, additional_capacity: usize) HypergraphZError!void {
+            try self.hyperedges.ensureUnusedCapacity(additional_capacity);
+        }
+
         /// Create a new vertex.
         pub fn createVertex(self: *Self, vertex: V) HypergraphZError!Uuid {
             const id = uuid.v7.new();
@@ -173,6 +178,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             self.vertices.putAssumeCapacity(id, .{ .relations = undefined, .data = vertex });
 
             return id;
+        }
+
+        /// Reserve capacity for the insertion of new vertices.
+        pub fn reserveVertices(self: *Self, additional_capacity: usize) HypergraphZError!void {
+            try self.vertices.ensureUnusedCapacity(additional_capacity);
         }
 
         /// Count the number of hyperedges.
@@ -2110,4 +2120,47 @@ test "get orphan vertices" {
     const orphans = try graph.getOrphanVertices();
     defer graph.allocator.free(orphans);
     try expectEqualSlices(Uuid, &[_]Uuid{orphan}, orphans);
+}
+
+const builtin = @import("builtin");
+pub fn panic(_: []const u8, _: ?*builtin.StackTrace) noreturn {
+    // your implementation here
+}
+
+test "reserve hyperedges" {
+    var graph = try HypergraphZ(
+        Hyperedge,
+        Vertex,
+    ).init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    try expect(graph.countHyperedges() == 0);
+    try expect(graph.hyperedges.capacity() == 0);
+    // Put more than `linear_scan_max`.
+    try graph.reserveHyperedges(20);
+    for (0..20) |_| {
+        _ = graph.createHyperedgeAssumeCapacity(.{});
+    }
+    try expect(graph.hyperedges.capacity() == 20);
+    // Calling `createHyperedgeAssumeCapacity` will panic but we can't test
+    // it, see: https://github.com/ziglang/zig/issues/1356.
+}
+
+test "reserve vertices" {
+    var graph = try HypergraphZ(
+        Hyperedge,
+        Vertex,
+    ).init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    try expect(graph.countVertices() == 0);
+    try expect(graph.vertices.capacity() == 0);
+    // Put more than `linear_scan_max`.
+    try graph.reserveVertices(20);
+    for (0..20) |_| {
+        _ = graph.createVertexAssumeCapacity(.{});
+    }
+    try expect(graph.vertices.capacity() == 20);
+    // Calling `createVertexAssumeCapacity` will panic but we can't test
+    // it, see: https://github.com/ziglang/zig/issues/1356.
 }
