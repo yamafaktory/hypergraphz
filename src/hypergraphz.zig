@@ -122,31 +122,10 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             self.* = undefined;
         }
 
-        const EntityTag = enum { arrayList, arrayHash };
-        const EntityUnion = union(EntityTag) {
-            arrayList: *EntityArrayList(H),
-            arrayHash: *EntityArrayHashMap(V),
-        };
-        /// Internal method to initialize entity relations if necessary.
-        fn _initRelationsIfEmpty(self: Self, entity: EntityUnion) void {
-            switch (entity) {
-                .arrayList => |a| {
-                    if (a.relations.items.len == 0) {
-                        a.relations = ArrayList(Uuid).init(self.allocator);
-                    }
-                },
-                .arrayHash => |a| {
-                    if (a.relations.count() == 0) {
-                        a.relations = AutoArrayHashMap(Uuid, void).init(self.allocator);
-                    }
-                },
-            }
-        }
-
         /// Create a new hyperedge.
         pub fn createHyperedge(self: *Self, hyperedge: H) HypergraphZError!Uuid {
             const id = uuid.v7.new();
-            try self.hyperedges.put(id, .{ .relations = undefined, .data = hyperedge });
+            try self.hyperedges.put(id, .{ .relations = ArrayList(Uuid).init(self.allocator), .data = hyperedge });
 
             return id;
         }
@@ -154,7 +133,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Create a new hyperedge assuming there is enough capacity.
         pub fn createHyperedgeAssumeCapacity(self: *Self, hyperedge: H) Uuid {
             const id = uuid.v7.new();
-            self.hyperedges.putAssumeCapacity(id, .{ .relations = undefined, .data = hyperedge });
+            self.hyperedges.putAssumeCapacity(id, .{ .relations = ArrayList(Uuid).init(self.allocator), .data = hyperedge });
 
             return id;
         }
@@ -167,7 +146,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Create a new vertex.
         pub fn createVertex(self: *Self, vertex: V) HypergraphZError!Uuid {
             const id = uuid.v7.new();
-            try self.vertices.put(id, .{ .relations = undefined, .data = vertex });
+            try self.vertices.put(id, .{ .relations = AutoArrayHashMap(Uuid, void).init(self.allocator), .data = vertex });
 
             return id;
         }
@@ -175,7 +154,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Create a new vertex assuming there is enough capacity.
         pub fn createVertexAssumeCapacity(self: *Self, vertex: V) Uuid {
             const id = uuid.v7.new();
-            self.vertices.putAssumeCapacity(id, .{ .relations = undefined, .data = vertex });
+            self.vertices.putAssumeCapacity(id, .{ .relations = AutoArrayHashMap(Uuid, void).init(self.allocator), .data = vertex });
 
             return id;
         }
@@ -483,15 +462,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
-
             // Append vertex to hyperedge relations.
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             try hyperedge.relations.append(vertex_id);
 
+            // Add hyperedge to vertex relations.
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
-
             try vertex.relations.put(hyperedge_id, {});
 
             debug("vertex {} appended to hyperedge {}", .{
@@ -505,15 +481,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
-
             // Prepend vertex to hyperedge relations.
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             try hyperedge.relations.insertSlice(0, &.{vertex_id});
 
+            // Add hyperedge to vertex relations.
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
-
             try vertex.relations.put(hyperedge_id, {});
 
             debug("vertex {} prepended to hyperedge {}", .{
@@ -531,14 +504,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             if (index > hyperedge.relations.items.len) {
                 return HypergraphZError.IndexOutOfBounds;
             }
-            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Insert vertex into hyperedge relations at given index.
             try hyperedge.relations.insert(index, vertex_id);
 
             const vertex = self.vertices.getPtr(vertex_id).?;
-            self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
-
             try vertex.relations.put(hyperedge_id, {});
 
             debug("vertex {} inserted into hyperedge {} at index {}", .{
@@ -560,17 +530,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 try self.checkIfVertexExists(v);
             }
 
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
-
             // Append vertices to hyperedge relations.
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             try hyperedge.relations.appendSlice(vertex_ids);
 
             for (vertex_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
-
-                self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
-
                 try vertex.relations.put(hyperedge_id, {});
             }
 
@@ -589,17 +554,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 try self.checkIfVertexExists(v);
             }
 
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
-
             // Prepend vertices to hyperedge relations.
+            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             try hyperedge.relations.insertSlice(0, vertices_ids);
 
             for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
-
-                self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
-
                 try vertex.relations.put(hyperedge_id, {});
             }
 
@@ -622,16 +582,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             if (index > hyperedge.relations.items.len) {
                 return HypergraphZError.IndexOutOfBounds;
             }
-            self._initRelationsIfEmpty(EntityUnion{ .arrayList = hyperedge });
 
             // Prepend vertices to hyperedge relations.
             try hyperedge.relations.insertSlice(index, vertices_ids);
 
             for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
-
-                self._initRelationsIfEmpty(EntityUnion{ .arrayHash = vertex });
-
                 try vertex.relations.put(hyperedge_id, {});
             }
 
