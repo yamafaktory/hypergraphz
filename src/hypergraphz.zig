@@ -4,7 +4,6 @@
 //! Each hyperedge can contain vertices directed to themselves one or more times.
 
 const std = @import("std");
-const uuid = @import("uuid");
 
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -13,10 +12,11 @@ const AutoHashMap = std.AutoHashMap;
 const AutoArrayHashMap = std.array_hash_map.AutoArrayHashMap;
 const MultiArrayList = std.MultiArrayList;
 const PriorityQueue = std.PriorityQueue;
-const Uuid = uuid.Uuid;
 const assert = std.debug.assert;
 const debug = std.log.debug;
 const window = std.mem.window;
+
+pub const HypergraphZId = usize;
 
 /// HypergraphZ errors.
 pub const HypergraphZError = (error{
@@ -37,9 +37,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// The allocator used by the HypergraphZ instance.
         allocator: Allocator,
         /// A hashmap of hyperedges.
-        hyperedges: AutoArrayHashMap(Uuid, EntityArrayList(H)),
+        hyperedges: AutoArrayHashMap(HypergraphZId, EntityArrayList(H)),
         /// A hashmap of vertices.
-        vertices: AutoArrayHashMap(Uuid, EntityArrayHashMap(V)),
+        vertices: AutoArrayHashMap(HypergraphZId, EntityArrayHashMap(V)),
+        /// Internal counter for both the hyperedges and vertices ids.
+        id_counter: usize = 0,
 
         comptime {
             assert(@typeInfo(H) == .Struct);
@@ -60,7 +62,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         ) type {
             return struct {
                 data: D,
-                relations: AutoArrayHashMap(Uuid, void),
+                relations: AutoArrayHashMap(HypergraphZId, void),
             };
         }
 
@@ -70,7 +72,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         ) type {
             return struct {
                 data: D,
-                relations: ArrayList(Uuid),
+                relations: ArrayList(HypergraphZId),
             };
         }
 
@@ -86,8 +88,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn init(allocator: Allocator, config: HypergraphZConfig) HypergraphZError!Self {
             // We use an array list for hyperedges and an array hashmap for vertices.
             // The hyperedges can't be a hashmap since a hyperedge can contain the same vertex multiple times.
-            var h = AutoArrayHashMap(Uuid, EntityArrayList(H)).init(allocator);
-            var v = AutoArrayHashMap(Uuid, EntityArrayHashMap(V)).init(allocator);
+            var h = AutoArrayHashMap(HypergraphZId, EntityArrayList(H)).init(allocator);
+            var v = AutoArrayHashMap(HypergraphZId, EntityArrayHashMap(V)).init(allocator);
 
             if (config.hyperedges_capacity) |c| {
                 try h.ensureTotalCapacity(c);
@@ -122,18 +124,24 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             self.* = undefined;
         }
 
+        /// Internal method to get an id.
+        fn _getId(self: *Self) HypergraphZId {
+            self.id_counter += 1;
+            return self.id_counter;
+        }
+
         /// Create a new hyperedge.
-        pub fn createHyperedge(self: *Self, hyperedge: H) HypergraphZError!Uuid {
-            const id = uuid.v7.new();
-            try self.hyperedges.put(id, .{ .relations = ArrayList(Uuid).init(self.allocator), .data = hyperedge });
+        pub fn createHyperedge(self: *Self, hyperedge: H) HypergraphZError!HypergraphZId {
+            const id = self._getId();
+            try self.hyperedges.put(id, .{ .relations = ArrayList(HypergraphZId).init(self.allocator), .data = hyperedge });
 
             return id;
         }
 
         /// Create a new hyperedge assuming there is enough capacity.
-        pub fn createHyperedgeAssumeCapacity(self: *Self, hyperedge: H) Uuid {
-            const id = uuid.v7.new();
-            self.hyperedges.putAssumeCapacity(id, .{ .relations = ArrayList(Uuid).init(self.allocator), .data = hyperedge });
+        pub fn createHyperedgeAssumeCapacity(self: *Self, hyperedge: H) HypergraphZId {
+            const id = self._getId();
+            self.hyperedges.putAssumeCapacity(id, .{ .relations = ArrayList(HypergraphZId).init(self.allocator), .data = hyperedge });
 
             return id;
         }
@@ -144,17 +152,17 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Create a new vertex.
-        pub fn createVertex(self: *Self, vertex: V) HypergraphZError!Uuid {
-            const id = uuid.v7.new();
-            try self.vertices.put(id, .{ .relations = AutoArrayHashMap(Uuid, void).init(self.allocator), .data = vertex });
+        pub fn createVertex(self: *Self, vertex: V) HypergraphZError!HypergraphZId {
+            const id = self._getId();
+            try self.vertices.put(id, .{ .relations = AutoArrayHashMap(HypergraphZId, void).init(self.allocator), .data = vertex });
 
             return id;
         }
 
         /// Create a new vertex assuming there is enough capacity.
-        pub fn createVertexAssumeCapacity(self: *Self, vertex: V) Uuid {
-            const id = uuid.v7.new();
-            self.vertices.putAssumeCapacity(id, .{ .relations = AutoArrayHashMap(Uuid, void).init(self.allocator), .data = vertex });
+        pub fn createVertexAssumeCapacity(self: *Self, vertex: V) HypergraphZId {
+            const id = self._getId();
+            self.vertices.putAssumeCapacity(id, .{ .relations = AutoArrayHashMap(HypergraphZId, void).init(self.allocator), .data = vertex });
 
             return id;
         }
@@ -175,7 +183,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Check if an hyperedge exists.
-        pub fn checkIfHyperedgeExists(self: *Self, id: Uuid) HypergraphZError!void {
+        pub fn checkIfHyperedgeExists(self: *Self, id: HypergraphZId) HypergraphZError!void {
             if (!self.hyperedges.contains(id)) {
                 debug("hyperedge {} not found", .{id});
 
@@ -184,7 +192,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Check if a vertex exists.
-        pub fn checkIfVertexExists(self: *Self, id: Uuid) HypergraphZError!void {
+        pub fn checkIfVertexExists(self: *Self, id: HypergraphZId) HypergraphZError!void {
             if (!self.vertices.contains(id)) {
                 debug("vertex {} not found", .{id});
 
@@ -193,7 +201,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Get a hyperedge.
-        pub fn getHyperedge(self: *Self, id: Uuid) HypergraphZError!H {
+        pub fn getHyperedge(self: *Self, id: HypergraphZId) HypergraphZError!H {
             try self.checkIfHyperedgeExists(id);
 
             const hyperedge = self.hyperedges.get(id).?;
@@ -202,7 +210,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Get a vertex.
-        pub fn getVertex(self: *Self, id: Uuid) HypergraphZError!V {
+        pub fn getVertex(self: *Self, id: HypergraphZId) HypergraphZError!V {
             try self.checkIfVertexExists(id);
 
             const hyperedge = self.vertices.get(id).?;
@@ -211,24 +219,24 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Get all the hyperedges.
-        pub fn getAllHyperedges(self: *Self) []Uuid {
+        pub fn getAllHyperedges(self: *Self) []HypergraphZId {
             return self.hyperedges.keys();
         }
 
         /// Get all the vertices.
-        pub fn getAllVertices(self: *Self) []Uuid {
+        pub fn getAllVertices(self: *Self) []HypergraphZId {
             return self.vertices.keys();
         }
 
         /// Update a hyperedge.
-        pub fn updateHyperedge(self: *Self, id: Uuid, hyperedge: H) HypergraphZError!void {
+        pub fn updateHyperedge(self: *Self, id: HypergraphZId, hyperedge: H) HypergraphZError!void {
             try self.checkIfHyperedgeExists(id);
 
             self.hyperedges.getPtr(id).?.data = hyperedge;
         }
 
         /// Update a vertex.
-        pub fn updateVertex(self: *Self, id: Uuid, vertex: V) HypergraphZError!void {
+        pub fn updateVertex(self: *Self, id: HypergraphZId, vertex: V) HypergraphZError!void {
             try self.checkIfVertexExists(id);
 
             self.vertices.getPtr(id).?.data = vertex;
@@ -237,7 +245,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Get the indegree of a vertex.
         /// Note that a vertex can be directed to itself multiple times.
         /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
-        pub fn getVertexIndegree(self: *Self, id: Uuid) HypergraphZError!usize {
+        pub fn getVertexIndegree(self: *Self, id: HypergraphZId) HypergraphZError!usize {
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.get(id).?;
@@ -247,7 +255,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
-                    var wIt = window(Uuid, hyperedge.relations.items, 2, 1);
+                    var wIt = window(HypergraphZId, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
                         if (v[0] == id) {
                             indegree += 1;
@@ -262,7 +270,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Get the indegree of a vertex.
         /// Note that a vertex can be directed to itself multiple times.
         /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
-        pub fn getVertexOutdegree(self: *Self, id: Uuid) HypergraphZError!usize {
+        pub fn getVertexOutdegree(self: *Self, id: HypergraphZId) HypergraphZError!usize {
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.get(id).?;
@@ -272,7 +280,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
-                    var wIt = window(Uuid, hyperedge.relations.items, 2, 1);
+                    var wIt = window(HypergraphZId, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
                         if (v[1] == id) {
                             outdegree += 1;
@@ -288,7 +296,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// hyperedge ids and values are an array of adjacent vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const AdjacencyResult = struct {
-            data: AutoArrayHashMap(Uuid, ArrayList(Uuid)),
+            data: AutoArrayHashMap(HypergraphZId, ArrayList(HypergraphZId)),
 
             fn deinit(self: *AdjacencyResult) void {
                 // Deinit the array lists.
@@ -303,11 +311,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         };
         /// Get the adjacents vertices connected to a vertex.
         /// The caller is responsible for freeing the result memory with `denit`.
-        pub fn getVertexAdjacencyTo(self: *Self, id: Uuid) HypergraphZError!AdjacencyResult {
+        pub fn getVertexAdjacencyTo(self: *Self, id: HypergraphZId) HypergraphZError!AdjacencyResult {
             try self.checkIfVertexExists(id);
 
             // We don't need to release the memory here since the caller will do it.
-            var adjacents = AutoArrayHashMap(Uuid, ArrayList(Uuid)).init(self.allocator);
+            var adjacents = AutoArrayHashMap(HypergraphZId, ArrayList(HypergraphZId)).init(self.allocator);
             const vertex = self.vertices.get(id).?;
             var it = vertex.relations.iterator();
             while (it.next()) |kv| {
@@ -315,14 +323,14 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
-                    var wIt = window(Uuid, hyperedge.relations.items, 2, 1);
+                    var wIt = window(HypergraphZId, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
                         if (v[1] == id) {
                             const adjacent = v[0];
                             const result = try adjacents.getOrPut(hyperedge_id);
                             // Initialize if not found.
                             if (!result.found_existing) {
-                                result.value_ptr.* = ArrayList(Uuid).init(self.allocator);
+                                result.value_ptr.* = ArrayList(HypergraphZId).init(self.allocator);
                             }
                             try result.value_ptr.*.append(adjacent);
                             debug("adjacent vertex {} to vertex {} found in hyperedge {}", .{ adjacent, id, hyperedge_id });
@@ -336,11 +344,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Get the adjacents vertices connected from a vertex.
         /// The caller is responsible for freeing the result memory with `denit`.
-        pub fn getVertexAdjacencyFrom(self: *Self, id: Uuid) HypergraphZError!AdjacencyResult {
+        pub fn getVertexAdjacencyFrom(self: *Self, id: HypergraphZId) HypergraphZError!AdjacencyResult {
             try self.checkIfVertexExists(id);
 
             // We don't need to release the memory here since the caller will do it.
-            var adjacents = AutoArrayHashMap(Uuid, ArrayList(Uuid)).init(self.allocator);
+            var adjacents = AutoArrayHashMap(HypergraphZId, ArrayList(HypergraphZId)).init(self.allocator);
             const vertex = self.vertices.get(id).?;
             var it = vertex.relations.iterator();
             while (it.next()) |kv| {
@@ -348,14 +356,14 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
-                    var wIt = window(Uuid, hyperedge.relations.items, 2, 1);
+                    var wIt = window(HypergraphZId, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
                         if (v[0] == id) {
                             const adjacent = v[1];
                             const result = try adjacents.getOrPut(hyperedge_id);
                             // Initialize if not found.
                             if (!result.found_existing) {
-                                result.value_ptr.* = ArrayList(Uuid).init(self.allocator);
+                                result.value_ptr.* = ArrayList(HypergraphZId).init(self.allocator);
                             }
                             try result.value_ptr.*.append(adjacent);
                             debug("adjacent vertex {} from vertex {} found in hyperedge {}", .{ adjacent, id, hyperedge_id });
@@ -368,7 +376,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a hyperedge.
-        pub fn deleteHyperedge(self: *Self, id: Uuid, drop_vertices: bool) HypergraphZError!void {
+        pub fn deleteHyperedge(self: *Self, id: HypergraphZId, drop_vertices: bool) HypergraphZError!void {
             try self.checkIfHyperedgeExists(id);
 
             const hyperedge = self.hyperedges.getPtr(id).?;
@@ -408,7 +416,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a vertex.
-        pub fn deleteVertex(self: *Self, id: Uuid) HypergraphZError!void {
+        pub fn deleteVertex(self: *Self, id: HypergraphZId) HypergraphZError!void {
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.getPtr(id).?;
@@ -418,7 +426,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 // Delete the vertex from the hyperedge relations.
                 // The same vertex can appear multiple times within a hyperedge.
                 // Create a temporary list to store the relations without the vertex.
-                var tmp = ArrayList(Uuid).init(self.allocator);
+                var tmp = ArrayList(HypergraphZId).init(self.allocator);
                 defer tmp.deinit();
                 for (hyperedge.relations.items) |v| {
                     if (v != id) {
@@ -426,7 +434,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                     }
                 }
                 // Swap the temporary list with the hyperedge relations.
-                std.mem.swap(ArrayList(Uuid), &hyperedge.relations, &tmp);
+                std.mem.swap(ArrayList(HypergraphZId), &hyperedge.relations, &tmp);
             }
 
             // Release memory.
@@ -440,7 +448,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Get all vertices of a hyperedge as a slice.
-        pub fn getHyperedgeVertices(self: *Self, hyperedge_id: Uuid) HypergraphZError![]Uuid {
+        pub fn getHyperedgeVertices(self: *Self, hyperedge_id: HypergraphZId) HypergraphZError![]HypergraphZId {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
@@ -449,7 +457,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Get all hyperedges of a vertex as a slice.
-        pub fn getVertexHyperedges(self: *Self, vertex_id: Uuid) HypergraphZError![]Uuid {
+        pub fn getVertexHyperedges(self: *Self, vertex_id: HypergraphZId) HypergraphZError![]HypergraphZId {
             try self.checkIfVertexExists(vertex_id);
 
             const vertex = self.vertices.getPtr(vertex_id).?;
@@ -458,7 +466,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Append a vertex to a hyperedge.
-        pub fn appendVertexToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HypergraphZError!void {
+        pub fn appendVertexToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_id: HypergraphZId) HypergraphZError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
@@ -477,7 +485,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Prepend a vertex to a hyperedge.
-        pub fn prependVertexToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HypergraphZError!void {
+        pub fn prependVertexToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_id: HypergraphZId) HypergraphZError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
@@ -496,7 +504,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Insert a vertex into a hyperedge at a given index.
-        pub fn insertVertexIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid, index: usize) HypergraphZError!void {
+        pub fn insertVertexIntoHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_id: HypergraphZId, index: usize) HypergraphZError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
@@ -519,7 +527,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Append vertices to a hyperedge.
-        pub fn appendVerticesToHyperedge(self: *Self, hyperedge_id: Uuid, vertex_ids: []const Uuid) HypergraphZError!void {
+        pub fn appendVerticesToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_ids: []const HypergraphZId) HypergraphZError!void {
             if (vertex_ids.len == 0) {
                 debug("no vertices to append to hyperedge {}, skipping", .{hyperedge_id});
                 return;
@@ -543,7 +551,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Prepend vertices to a hyperedge.
-        pub fn prependVerticesToHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid) HypergraphZError!void {
+        pub fn prependVerticesToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertices_ids: []const HypergraphZId) HypergraphZError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to prepend to hyperedge {}, skipping", .{hyperedge_id});
                 return;
@@ -567,7 +575,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Insert vertices into a hyperedge at a given index.
-        pub fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: Uuid, vertices_ids: []const Uuid, index: usize) HypergraphZError!void {
+        pub fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertices_ids: []const HypergraphZId, index: usize) HypergraphZError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to insert into hyperedge {}, skipping", .{hyperedge_id});
                 return HypergraphZError.NoVerticesToInsert;
@@ -595,7 +603,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a vertex from a hyperedge.
-        pub fn deleteVertexFromHyperedge(self: *Self, hyperedge_id: Uuid, vertex_id: Uuid) HypergraphZError!void {
+        pub fn deleteVertexFromHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_id: HypergraphZId) HypergraphZError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
             try self.checkIfVertexExists(vertex_id);
 
@@ -603,7 +611,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
             // The same vertex can appear multiple times within a hyperedge.
             // Create a temporary list to store the relations without the vertex.
-            var tmp = ArrayList(Uuid).init(self.allocator);
+            var tmp = ArrayList(HypergraphZId).init(self.allocator);
             defer tmp.deinit();
             for (hyperedge.relations.items) |v| {
                 if (v != vertex_id) {
@@ -611,7 +619,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
             // Swap the temporary list with the hyperedge relations.
-            std.mem.swap(ArrayList(Uuid), &hyperedge.relations, &tmp);
+            std.mem.swap(ArrayList(HypergraphZId), &hyperedge.relations, &tmp);
 
             const vertex = self.vertices.getPtr(vertex_id).?;
             const removed = vertex.relations.orderedRemove(hyperedge_id);
@@ -620,7 +628,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Delete a vertex from a hyperedge at a given index.
-        pub fn deleteVertexByIndexFromHyperedge(self: *Self, hyperedge_id: Uuid, index: usize) HypergraphZError!void {
+        pub fn deleteVertexByIndexFromHyperedge(self: *Self, hyperedge_id: HypergraphZId, index: usize) HypergraphZError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
@@ -647,7 +655,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Get the intersections between multiple hyperedges.
         /// This method returns an owned slice which must be freed by the caller.
-        pub fn getIntersections(self: *Self, hyperedges_ids: []const Uuid) HypergraphZError![]const Uuid {
+        pub fn getIntersections(self: *Self, hyperedges_ids: []const HypergraphZId) HypergraphZError![]const HypergraphZId {
             if (hyperedges_ids.len < 2) {
                 debug("at least two hyperedges must be provided, skipping", .{});
                 return HypergraphZError.NotEnoughHyperedgesProvided;
@@ -658,15 +666,15 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             // We don't need to release the memory here since the caller will do it.
-            var intersections = ArrayList(Uuid).init(self.allocator);
-            var matches = AutoArrayHashMap(Uuid, usize).init(self.allocator);
+            var intersections = ArrayList(HypergraphZId).init(self.allocator);
+            var matches = AutoArrayHashMap(HypergraphZId, usize).init(self.allocator);
             defer matches.deinit();
 
             for (hyperedges_ids) |id| {
                 const hyperedge = self.hyperedges.getPtr(id).?;
 
                 // Keep track of visited vertices since the same vertex can appear multiple times within a hyperedge.
-                var visited = AutoArrayHashMap(Uuid, void).init(self.allocator);
+                var visited = AutoArrayHashMap(HypergraphZId, void).init(self.allocator);
                 defer visited.deinit();
 
                 for (hyperedge.relations.items) |v| {
@@ -692,12 +700,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         const Node = struct {
-            from: Uuid,
+            from: HypergraphZId,
             weight: usize,
         };
-        const CameFrom = AutoHashMap(Uuid, ?Node);
-        const Queue = PriorityQueue(Uuid, *const CameFrom, compareNode);
-        fn compareNode(map: *const CameFrom, n1: Uuid, n2: Uuid) std.math.Order {
+        const CameFrom = AutoHashMap(HypergraphZId, ?Node);
+        const Queue = PriorityQueue(HypergraphZId, *const CameFrom, compareNode);
+        fn compareNode(map: *const CameFrom, n1: HypergraphZId, n2: HypergraphZId) std.math.Order {
             const node1 = map.get(n1).?;
             const node2 = map.get(n2).?;
 
@@ -706,7 +714,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Struct containing the shortest path as a list of vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const ShortestPathResult = struct {
-            data: ?ArrayList(Uuid),
+            data: ?ArrayList(HypergraphZId),
 
             fn deinit(self: *ShortestPathResult) void {
                 if (self.data) |d| d.deinit();
@@ -715,7 +723,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         };
         /// Find the shortest path between two vertices using the A* algorithm.
         /// The caller is responsible for freeing the result memory with `deinit`.
-        pub fn findShortestPath(self: *Self, from: Uuid, to: Uuid) HypergraphZError!ShortestPathResult {
+        pub fn findShortestPath(self: *Self, from: HypergraphZId, to: HypergraphZId) HypergraphZError!ShortestPathResult {
             try self.checkIfVertexExists(from);
             try self.checkIfVertexExists(to);
 
@@ -723,7 +731,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             defer arena.deinit();
 
             var came_from = CameFrom.init(arena.allocator());
-            var cost_so_far = AutoHashMap(Uuid, usize).init(arena.allocator());
+            var cost_so_far = AutoHashMap(HypergraphZId, usize).init(arena.allocator());
             var frontier = Queue.init(arena.allocator(), &came_from);
 
             try came_from.put(from, null);
@@ -738,7 +746,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 // Get adjacent vertices and their weights from the current hyperedge.
                 var result = try self.getVertexAdjacencyFrom(current);
                 defer result.deinit();
-                var adjacentsWithWeight = AutoArrayHashMap(Uuid, usize).init(self.allocator);
+                var adjacentsWithWeight = AutoArrayHashMap(HypergraphZId, usize).init(self.allocator);
                 defer adjacentsWithWeight.deinit();
                 var it = result.data.iterator();
                 while (it.next()) |kv| {
@@ -763,7 +771,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             var it = came_from.iterator();
-            var visited = AutoArrayHashMap(Uuid, Uuid).init(self.allocator);
+            var visited = AutoArrayHashMap(HypergraphZId, HypergraphZId).init(self.allocator);
             defer visited.deinit();
             while (it.next()) |kv| {
                 const node = kv.value_ptr.*;
@@ -780,7 +788,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             // We iterate in reverse order.
-            var path = ArrayList(Uuid).init(self.allocator);
+            var path = ArrayList(HypergraphZId).init(self.allocator);
             try path.append(to);
             while (true) {
                 if (last == 0) break;
@@ -789,26 +797,26 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 if (next == null or next == 0) break;
                 last = next;
             }
-            std.mem.reverse(Uuid, path.items);
+            std.mem.reverse(HypergraphZId, path.items);
 
             debug("path found between {} and {}", .{ from, to });
             return .{ .data = path };
         }
 
         /// Reverse a hyperedge.
-        pub fn reverseHyperedge(self: *Self, hyperedge_id: Uuid) HypergraphZError!void {
+        pub fn reverseHyperedge(self: *Self, hyperedge_id: HypergraphZId) HypergraphZError!void {
             try self.checkIfHyperedgeExists(hyperedge_id);
 
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             const tmp = try hyperedge.relations.toOwnedSlice();
-            std.mem.reverse(Uuid, tmp);
-            hyperedge.relations = ArrayList(Uuid).fromOwnedSlice(self.allocator, tmp);
+            std.mem.reverse(HypergraphZId, tmp);
+            hyperedge.relations = ArrayList(HypergraphZId).fromOwnedSlice(self.allocator, tmp);
             debug("hyperedge {} reversed", .{hyperedge_id});
         }
 
         /// Join two or more hyperedges into one.
         /// All the vertices are moved to the first hyperedge.
-        pub fn joinHyperedges(self: *Self, hyperedges_ids: []const Uuid) HypergraphZError!void {
+        pub fn joinHyperedges(self: *Self, hyperedges_ids: []const HypergraphZId) HypergraphZError!void {
             if (hyperedges_ids.len < 2) {
                 debug("at least two hyperedges must be provided, skipping", .{});
                 return HypergraphZError.NotEnoughHyperedgesProvided;
@@ -848,14 +856,14 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Contract a hyperedge by merging its vertices into one.
         /// The resulting vertex will be the last vertex in the hyperedge.
         /// https://en.wikipedia.org/wiki/Edge_contraction
-        pub fn contractHyperedge(self: *Self, id: Uuid) HypergraphZError!void {
+        pub fn contractHyperedge(self: *Self, id: HypergraphZId) HypergraphZError!void {
             try self.checkIfHyperedgeExists(id);
 
             // Get the deduped vertices of the hyperedge.
             const hyperedge = self.hyperedges.getPtr(id).?;
             var arena = ArenaAllocator.init(self.allocator);
             defer arena.deinit();
-            var deduped = AutoHashMap(Uuid, void).init(arena.allocator());
+            var deduped = AutoHashMap(HypergraphZId, void).init(arena.allocator());
             const vertices = hyperedge.relations.items;
             for (vertices) |v| {
                 try deduped.put(v, {});
@@ -906,7 +914,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// hyperedge ids.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const HyperedgesResult = struct {
-            data: AutoArrayHashMap(Uuid, void),
+            data: AutoArrayHashMap(HypergraphZId, void),
 
             fn deinit(self: *HyperedgesResult) void {
                 self.data.deinit();
@@ -915,14 +923,14 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         };
         /// Get all the hyperedges connecting two vertices.
         /// This method returns an owned slice which must be freed by the caller.
-        pub fn getHyperedgesConnecting(self: *Self, first_vertex_id: Uuid, second_vertex_id: Uuid) HypergraphZError!HyperedgesResult {
+        pub fn getHyperedgesConnecting(self: *Self, first_vertex_id: HypergraphZId, second_vertex_id: HypergraphZId) HypergraphZError!HyperedgesResult {
             try self.checkIfVertexExists(first_vertex_id);
             try self.checkIfVertexExists(second_vertex_id);
 
             const eq = first_vertex_id == second_vertex_id;
             const first_vertex = self.vertices.get(first_vertex_id).?;
             var it = first_vertex.relations.iterator();
-            var deduped = AutoArrayHashMap(Uuid, void).init(self.allocator);
+            var deduped = AutoArrayHashMap(HypergraphZId, void).init(self.allocator);
             while (it.next()) |kv| {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 var found_occurences: usize = 0;
@@ -942,8 +950,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Tuple struct containing a vertex id and its hyperedge id as an endpoint.
         pub const EndpointTuple = struct {
-            hyperedge_id: Uuid,
-            vertex_id: Uuid,
+            hyperedge_id: HypergraphZId,
+            vertex_id: HypergraphZId,
         };
         /// Struct containing the endpoints - initial and terminal - as two
         /// multi array lists of `EndpointTuple`.
@@ -989,8 +997,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Get the orphan hyperedges.
         /// The caller is responsible for freeing the memory with `deinit`.
-        pub fn getOrphanHyperedges(self: *Self) HypergraphZError![]const Uuid {
-            var orphans = ArrayList(Uuid).init(self.allocator);
+        pub fn getOrphanHyperedges(self: *Self) HypergraphZError![]const HypergraphZId {
+            var orphans = ArrayList(HypergraphZId).init(self.allocator);
             var it = self.hyperedges.iterator();
             while (it.next()) |kv| {
                 const vertices = kv.value_ptr.relations;
@@ -1005,8 +1013,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Get the orphan vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
-        pub fn getOrphanVertices(self: *Self) HypergraphZError![]const Uuid {
-            var orphans = ArrayList(Uuid).init(self.allocator);
+        pub fn getOrphanVertices(self: *Self) HypergraphZError![]const HypergraphZId {
+            var orphans = ArrayList(HypergraphZId).init(self.allocator);
             var it = self.vertices.iterator();
             while (it.next()) |kv| {
                 const hyperedges = kv.value_ptr.relations;
@@ -1024,6 +1032,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 const expect = std.testing.expect;
 const expectEqualSlices = std.testing.expectEqualSlices;
 const expectError = std.testing.expectError;
+const maxInt = std.math.maxInt;
 
 const Hyperedge = struct { meow: bool = false, weight: usize = 1 };
 const Vertex = struct { purr: bool = false };
@@ -1039,15 +1048,17 @@ fn scaffold() HypergraphZError!HypergraphZ(Hyperedge, Vertex) {
     return graph;
 }
 
+const max_id = maxInt(HypergraphZId);
+
 const Data = struct {
-    v_a: Uuid,
-    v_b: Uuid,
-    v_c: Uuid,
-    v_d: Uuid,
-    v_e: Uuid,
-    h_a: Uuid,
-    h_b: Uuid,
-    h_c: Uuid,
+    v_a: HypergraphZId,
+    v_b: HypergraphZId,
+    v_c: HypergraphZId,
+    v_d: HypergraphZId,
+    v_e: HypergraphZId,
+    h_a: HypergraphZId,
+    h_b: HypergraphZId,
+    h_c: HypergraphZId,
 };
 fn generateTestData(graph: *HypergraphZ(Hyperedge, Vertex)) !Data {
     const v_a = graph.createVertexAssumeCapacity(.{});
@@ -1093,7 +1104,7 @@ test "create and get hyperedge" {
 
     const hyperedge_id = try graph.createHyperedge(.{});
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.getHyperedge(1));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.getHyperedge(max_id));
 
     const hyperedge = try graph.getHyperedge(hyperedge_id);
     try expect(@TypeOf(hyperedge) == Hyperedge);
@@ -1105,7 +1116,7 @@ test "create and get vertex" {
 
     const vertex_id = try graph.createVertex(.{});
 
-    try expectError(HypergraphZError.VertexNotFound, graph.getVertex(1));
+    try expectError(HypergraphZError.VertexNotFound, graph.getVertex(max_id));
 
     const vertex = try graph.getVertex(vertex_id);
     try expect(@TypeOf(vertex) == Vertex);
@@ -1118,7 +1129,7 @@ test "get all hyperedges" {
     const data = try generateTestData(&graph);
 
     const hyperedges = graph.getAllHyperedges();
-    try expectEqualSlices(Uuid, &[_]Uuid{ data.h_a, data.h_b, data.h_c }, hyperedges);
+    try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.h_a, data.h_b, data.h_c }, hyperedges);
 }
 
 test "get all vertices" {
@@ -1128,7 +1139,7 @@ test "get all vertices" {
     const data = try generateTestData(&graph);
 
     const vertices = graph.getAllVertices();
-    try expectEqualSlices(Uuid, &[_]Uuid{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_e }, vertices);
+    try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_e }, vertices);
 }
 
 test "append vertex to hyperedge" {
@@ -1142,9 +1153,9 @@ test "append vertex to hyperedge" {
     const second_vertex_id = try graph.createVertex(.{});
     try expect(first_vertex_id != 0);
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.appendVertexToHyperedge(1, 1));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.appendVertexToHyperedge(max_id, max_id));
 
-    try expectError(HypergraphZError.VertexNotFound, graph.appendVertexToHyperedge(hyperedge_id, 1));
+    try expectError(HypergraphZError.VertexNotFound, graph.appendVertexToHyperedge(hyperedge_id, max_id));
 
     try graph.appendVertexToHyperedge(hyperedge_id, first_vertex_id);
     try graph.appendVertexToHyperedge(hyperedge_id, second_vertex_id);
@@ -1165,9 +1176,9 @@ test "prepend vertex to hyperedge" {
     const second_vertex_id = try graph.createVertex(.{});
     try expect(first_vertex_id != 0);
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.prependVertexToHyperedge(1, 1));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.prependVertexToHyperedge(max_id, max_id));
 
-    try expectError(HypergraphZError.VertexNotFound, graph.prependVertexToHyperedge(hyperedge_id, 1));
+    try expectError(HypergraphZError.VertexNotFound, graph.prependVertexToHyperedge(hyperedge_id, max_id));
 
     try graph.prependVertexToHyperedge(hyperedge_id, first_vertex_id);
     try graph.prependVertexToHyperedge(hyperedge_id, second_vertex_id);
@@ -1188,9 +1199,9 @@ test "insert vertex into hyperedge" {
     const second_vertex_id = try graph.createVertex(.{});
     try expect(first_vertex_id != 0);
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.insertVertexIntoHyperedge(1, 1, 0));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.insertVertexIntoHyperedge(max_id, max_id, 0));
 
-    try expectError(HypergraphZError.VertexNotFound, graph.insertVertexIntoHyperedge(hyperedge_id, 1, 0));
+    try expectError(HypergraphZError.VertexNotFound, graph.insertVertexIntoHyperedge(hyperedge_id, max_id, 0));
 
     try expectError(HypergraphZError.IndexOutOfBounds, graph.insertVertexIntoHyperedge(hyperedge_id, first_vertex_id, 10));
 
@@ -1214,7 +1225,7 @@ test "get hyperedge vertices" {
         try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
     }
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.getHyperedgeVertices(1));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.getHyperedgeVertices(max_id));
 
     const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == nb_vertices);
@@ -1229,7 +1240,7 @@ test "append vertices to hyperedge" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr = ArrayList(Uuid).init(std.testing.allocator);
+    var arr = ArrayList(HypergraphZId).init(std.testing.allocator);
     defer arr.deinit();
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -1237,7 +1248,7 @@ test "append vertices to hyperedge" {
     }
     const ids = arr.items;
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.appendVerticesToHyperedge(1, ids));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.appendVerticesToHyperedge(max_id, ids));
 
     try expect(try graph.appendVerticesToHyperedge(hyperedge_id, &.{}) == undefined);
 
@@ -1263,7 +1274,7 @@ test "prepend vertices to hyperedge" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr = ArrayList(Uuid).init(std.testing.allocator);
+    var arr = ArrayList(HypergraphZId).init(std.testing.allocator);
     defer arr.deinit();
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -1271,7 +1282,7 @@ test "prepend vertices to hyperedge" {
     }
     const ids = arr.items;
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.prependVerticesToHyperedge(1, ids));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.prependVerticesToHyperedge(max_id, ids));
 
     try expect(try graph.prependVerticesToHyperedge(hyperedge_id, &.{}) == undefined);
 
@@ -1297,7 +1308,7 @@ test "insert vertices into hyperedge" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr = ArrayList(Uuid).init(std.testing.allocator);
+    var arr = ArrayList(HypergraphZId).init(std.testing.allocator);
     defer arr.deinit();
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -1305,7 +1316,7 @@ test "insert vertices into hyperedge" {
     }
     const ids = arr.items;
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.insertVerticesIntoHyperedge(1, ids, 0));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.insertVerticesIntoHyperedge(max_id, ids, 0));
 
     try expectError(HypergraphZError.NoVerticesToInsert, graph.insertVerticesIntoHyperedge(hyperedge_id, &.{}, 0));
 
@@ -1333,7 +1344,7 @@ test "get vertex hyperedges" {
     const vertex_id = try graph.createVertex(.{});
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
 
-    try expectError(HypergraphZError.VertexNotFound, graph.getVertexHyperedges(1));
+    try expectError(HypergraphZError.VertexNotFound, graph.getVertexHyperedges(max_id));
 
     const hyperedges = try graph.getVertexHyperedges(vertex_id);
     try expect(hyperedges.len == 1);
@@ -1371,9 +1382,9 @@ test "delete vertex from hyperedge" {
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.deleteVertexFromHyperedge(1, vertex_id));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.deleteVertexFromHyperedge(max_id, vertex_id));
 
-    try expectError(HypergraphZError.VertexNotFound, graph.deleteVertexFromHyperedge(hyperedge_id, 1));
+    try expectError(HypergraphZError.VertexNotFound, graph.deleteVertexFromHyperedge(hyperedge_id, max_id));
 
     try graph.deleteVertexFromHyperedge(hyperedge_id, vertex_id);
     const vertices = try graph.getHyperedgeVertices(hyperedge_id);
@@ -1391,7 +1402,7 @@ test "delete hyperedge only" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr = ArrayList(Uuid).init(std.testing.allocator);
+    var arr = ArrayList(HypergraphZId).init(std.testing.allocator);
     defer arr.deinit();
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -1420,7 +1431,7 @@ test "delete hyperedge and vertices" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr = ArrayList(Uuid).init(std.testing.allocator);
+    var arr = ArrayList(HypergraphZId).init(std.testing.allocator);
     defer arr.deinit();
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -1451,7 +1462,7 @@ test "delete vertex" {
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
 
-    try expectError(HypergraphZError.VertexNotFound, graph.deleteVertex(1));
+    try expectError(HypergraphZError.VertexNotFound, graph.deleteVertex(max_id));
 
     try graph.deleteVertex(vertex_id);
     const vertices = try graph.getHyperedgeVertices(hyperedge_id);
@@ -1468,7 +1479,7 @@ test "delete vertex by index from hyperedge" {
     // Create 10 vertices and store their ids.
     // Last two vertices are duplicated.
     const nb_vertices = 10;
-    var arr = ArrayList(Uuid).init(std.testing.allocator);
+    var arr = ArrayList(HypergraphZId).init(std.testing.allocator);
     defer arr.deinit();
     for (0..nb_vertices, 0..) |_, i| {
         if (i == nb_vertices - 1) {
@@ -1483,7 +1494,7 @@ test "delete vertex by index from hyperedge" {
     // Append vertices to the hyperedge.
     try graph.appendVerticesToHyperedge(hyperedge_id, ids);
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.deleteVertexByIndexFromHyperedge(1, 0));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.deleteVertexByIndexFromHyperedge(max_id, 0));
 
     // Delete the first vertex.
     // The hyperedge should be dropped from the relations.
@@ -1509,7 +1520,7 @@ test "get vertex indegree" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.VertexNotFound, graph.getVertexIndegree(1));
+    try expectError(HypergraphZError.VertexNotFound, graph.getVertexIndegree(max_id));
 
     try expect(try graph.getVertexIndegree(data.v_a) == 2);
     try expect(try graph.getVertexIndegree(data.v_b) == 2);
@@ -1524,7 +1535,7 @@ test "get vertex outdegree" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.VertexNotFound, graph.getVertexOutdegree(1));
+    try expectError(HypergraphZError.VertexNotFound, graph.getVertexOutdegree(max_id));
 
     try expect(try graph.getVertexOutdegree(data.v_a) == 2);
     try expect(try graph.getVertexOutdegree(data.v_b) == 2);
@@ -1539,7 +1550,7 @@ test "update hyperedge" {
 
     const hyperedge_id = try graph.createHyperedge(.{});
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.updateHyperedge(1, .{}));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.updateHyperedge(max_id, .{}));
 
     try graph.updateHyperedge(hyperedge_id, .{ .meow = true });
     const hyperedge = try graph.getHyperedge(hyperedge_id);
@@ -1553,7 +1564,7 @@ test "update vertex" {
 
     const vertex_id = try graph.createVertex(.{});
 
-    try expectError(HypergraphZError.VertexNotFound, graph.updateVertex(1, .{}));
+    try expectError(HypergraphZError.VertexNotFound, graph.updateVertex(max_id, .{}));
 
     try graph.updateVertex(vertex_id, .{ .purr = true });
     const vertex = try graph.getVertex(vertex_id);
@@ -1567,13 +1578,13 @@ test "get intersections" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.NotEnoughHyperedgesProvided, graph.getIntersections(&[_]Uuid{1}));
+    try expectError(HypergraphZError.NotEnoughHyperedgesProvided, graph.getIntersections(&[_]HypergraphZId{1}));
 
-    const hyperedges = [_]Uuid{ data.h_a, data.h_b, data.h_c };
-    const expected = [_]Uuid{ data.v_e, data.v_a };
+    const hyperedges = [_]HypergraphZId{ data.h_a, data.h_b, data.h_c };
+    const expected = [_]HypergraphZId{ data.v_e, data.v_a };
     const intersections = try graph.getIntersections(&hyperedges);
     defer graph.allocator.free(intersections);
-    try std.testing.expectEqualSlices(Uuid, &expected, intersections);
+    try std.testing.expectEqualSlices(HypergraphZId, &expected, intersections);
 }
 
 test "get vertex adjacency to" {
@@ -1582,7 +1593,7 @@ test "get vertex adjacency to" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.VertexNotFound, graph.getVertexAdjacencyTo(1));
+    try expectError(HypergraphZError.VertexNotFound, graph.getVertexAdjacencyTo(max_id));
 
     {
         var result = try graph.getVertexAdjacencyTo(data.v_a);
@@ -1696,7 +1707,7 @@ test "get vertex adjacency from" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.VertexNotFound, graph.getVertexAdjacencyFrom(1));
+    try expectError(HypergraphZError.VertexNotFound, graph.getVertexAdjacencyFrom(max_id));
 
     {
         var result = try graph.getVertexAdjacencyFrom(data.v_a);
@@ -1807,53 +1818,53 @@ test "find shortest path" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.VertexNotFound, graph.findShortestPath(1, data.v_a));
-    try expectError(HypergraphZError.VertexNotFound, graph.findShortestPath(data.v_a, 1));
+    try expectError(HypergraphZError.VertexNotFound, graph.findShortestPath(max_id, data.v_a));
+    try expectError(HypergraphZError.VertexNotFound, graph.findShortestPath(data.v_a, max_id));
 
     {
         var result = try graph.findShortestPath(data.v_a, data.v_e);
         defer result.deinit();
 
-        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_a, data.v_d, data.v_e }, result.data.?.items);
+        try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.v_a, data.v_d, data.v_e }, result.data.?.items);
     }
 
     {
         var result = try graph.findShortestPath(data.v_b, data.v_e);
         defer result.deinit();
 
-        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_b, data.v_c, data.v_e }, result.data.?.items);
+        try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.v_b, data.v_c, data.v_e }, result.data.?.items);
     }
 
     {
         var result = try graph.findShortestPath(data.v_d, data.v_a);
         defer result.deinit();
 
-        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_d, data.v_e, data.v_a }, result.data.?.items);
+        try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.v_d, data.v_e, data.v_a }, result.data.?.items);
     }
 
     {
         var result = try graph.findShortestPath(data.v_c, data.v_b);
         defer result.deinit();
 
-        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_c, data.v_d, data.v_b }, result.data.?.items);
+        try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.v_c, data.v_d, data.v_b }, result.data.?.items);
     }
 
     {
         var result = try graph.findShortestPath(data.v_d, data.v_b);
         defer result.deinit();
-        try expectEqualSlices(Uuid, &[_]Uuid{ data.v_d, data.v_b }, result.data.?.items);
+        try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.v_d, data.v_b }, result.data.?.items);
     }
 
     {
         var result = try graph.findShortestPath(data.v_c, data.v_c);
         defer result.deinit();
-        try expectEqualSlices(Uuid, &[_]Uuid{data.v_c}, result.data.?.items);
+        try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{data.v_c}, result.data.?.items);
     }
 
     {
         var result = try graph.findShortestPath(data.v_e, data.v_e);
         defer result.deinit();
-        try expectEqualSlices(Uuid, &[_]Uuid{data.v_e}, result.data.?.items);
+        try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{data.v_e}, result.data.?.items);
     }
 
     {
@@ -1870,7 +1881,7 @@ test "reverse hyperedge" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.reverseHyperedge(1));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.reverseHyperedge(max_id));
 
     try graph.reverseHyperedge(data.h_a);
     const vertices = try graph.getHyperedgeVertices(data.h_a);
@@ -1885,12 +1896,12 @@ test "join hyperedges" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.HyperedgeNotFound, graph.joinHyperedges(&[_]Uuid{ 1, 2 }));
-    try expectError(HypergraphZError.NotEnoughHyperedgesProvided, graph.joinHyperedges(&[_]Uuid{data.h_a}));
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.joinHyperedges(&[_]HypergraphZId{ max_id - 1, max_id }));
+    try expectError(HypergraphZError.NotEnoughHyperedgesProvided, graph.joinHyperedges(&[_]HypergraphZId{data.h_a}));
 
-    try graph.joinHyperedges(&[_]Uuid{ data.h_a, data.h_c });
+    try graph.joinHyperedges(&[_]HypergraphZId{ data.h_a, data.h_c });
     const vertices = try graph.getHyperedgeVertices(data.h_a);
-    try expectEqualSlices(Uuid, &[_]Uuid{
+    try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{
         data.v_a, data.v_b, data.v_c, data.v_d, data.v_e,
         data.v_b, data.v_c, data.v_c, data.v_e, data.v_a,
         data.v_d, data.v_b,
@@ -1907,12 +1918,12 @@ test "contract hyperedge" {
     try graph.contractHyperedge(data.h_b);
 
     const h_a = try graph.getHyperedgeVertices(data.h_a);
-    try expectEqualSlices(Uuid, &[_]Uuid{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_a }, h_a);
+    try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_a }, h_a);
 
     try expectError(HypergraphZError.HyperedgeNotFound, graph.getHyperedgeVertices(data.h_b));
 
     const h_c = try graph.getHyperedgeVertices(data.h_c);
-    try expectEqualSlices(Uuid, &[_]Uuid{ data.v_b, data.v_c, data.v_c, data.v_a, data.v_d, data.v_b }, h_c);
+    try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{ data.v_b, data.v_c, data.v_c, data.v_a, data.v_d, data.v_b }, h_c);
 }
 
 test "clear hypergraph" {
@@ -1932,8 +1943,8 @@ test "get hyperedges connecting vertices" {
 
     const data = try generateTestData(&graph);
 
-    try expectError(HypergraphZError.VertexNotFound, graph.getHyperedgesConnecting(1, data.v_b));
-    try expectError(HypergraphZError.VertexNotFound, graph.getHyperedgesConnecting(data.v_a, 1));
+    try expectError(HypergraphZError.VertexNotFound, graph.getHyperedgesConnecting(max_id, data.v_b));
+    try expectError(HypergraphZError.VertexNotFound, graph.getHyperedgesConnecting(data.v_a, max_id));
 
     {
         var result = try graph.getHyperedgesConnecting(data.v_a, data.v_b);
@@ -2063,7 +2074,7 @@ test "get orphan hyperedges" {
     const orphan = try graph.createHyperedge(.{});
     const orphans = try graph.getOrphanHyperedges();
     defer graph.allocator.free(orphans);
-    try expectEqualSlices(Uuid, &[_]Uuid{orphan}, orphans);
+    try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{orphan}, orphans);
 }
 
 test "get orphan vertices" {
@@ -2075,7 +2086,7 @@ test "get orphan vertices" {
     const orphan = try graph.createVertex(.{});
     const orphans = try graph.getOrphanVertices();
     defer graph.allocator.free(orphans);
-    try expectEqualSlices(Uuid, &[_]Uuid{orphan}, orphans);
+    try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{orphan}, orphans);
 }
 
 const builtin = @import("builtin");

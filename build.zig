@@ -87,13 +87,4 @@ pub fn build(b: *std.Build) void {
     }
     bench_step.dependOn(&bench_run.step);
     b.default_step.dependOn(bench_step);
-
-    if (b.lazyDependency("uuid", .{
-        .target = target,
-        .optimize = optimize,
-    })) |dep| {
-        unit_tests.root_module.addImport("uuid", dep.module("uuid"));
-        check.root_module.addImport("uuid", dep.module("uuid"));
-        bench_exe.root_module.addImport("uuid", dep.module("uuid"));
-    }
 }

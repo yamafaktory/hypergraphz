@@ -1,15 +1,14 @@
 //! Benchmarks for HypergraphZ.
 
 const std = @import("std");
-const uuid = @import("uuid");
 const hypergraphz = @import("hypergraphz.zig");
 
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
 const HypergraphZ = hypergraphz.HypergraphZ;
+const HypergraphZId = hypergraphz.HypergraphZId;
 const Timer = std.time.Timer;
-const Uuid = uuid.Uuid;
 const comptimePrint = std.fmt.comptimePrint;
 const fmtDuration = std.fmt.fmtDuration;
 const getStdOut = std.io.getStdOut;
@@ -66,7 +65,7 @@ pub fn main() !void {
     }
 
     {
-        var vertices = try ArrayList(Uuid).initCapacity(allocator, 1_000);
+        var vertices = try ArrayList(HypergraphZId).initCapacity(allocator, 1_000);
         defer vertices.deinit();
         var bench = try Bench.init(allocator, stdout, "generate 1_000 hyperedges with 1_000 vertices each in batches");
         for (0..1_000) |_| {
