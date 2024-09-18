@@ -46,7 +46,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         comptime {
             assert(@typeInfo(H) == .Struct);
             var weightFieldType: ?type = null;
-            for (@typeInfo(H).Struct.fields) |f| {
+            for (@typeInfo(H).Struct.fields) |*f| {
                 if (std.mem.eql(u8, f.name, "weight")) {
                     weightFieldType = f.type;
                 }
@@ -108,13 +108,13 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn deinit(self: *Self) void {
             // Deinit hyperedge relations.
             var h_it = self.hyperedges.iterator();
-            while (h_it.next()) |kv| {
+            while (h_it.next()) |*kv| {
                 kv.value_ptr.relations.deinit();
             }
 
             // Deinit vertex relations.
             var v_it = self.vertices.iterator();
-            while (v_it.next()) |kv| {
+            while (v_it.next()) |*kv| {
                 kv.value_ptr.relations.deinit();
             }
 
@@ -251,7 +251,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             const vertex = self.vertices.get(id).?;
             var indegree: usize = 0;
             var it = vertex.relations.iterator();
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
@@ -276,7 +276,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             const vertex = self.vertices.get(id).?;
             var outdegree: usize = 0;
             var it = vertex.relations.iterator();
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
@@ -301,7 +301,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             fn deinit(self: *AdjacencyResult) void {
                 // Deinit the array lists.
                 var it = self.data.iterator();
-                while (it.next()) |kv| {
+                while (it.next()) |*kv| {
                     kv.value_ptr.deinit();
                 }
 
@@ -318,7 +318,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             var adjacents = AutoArrayHashMap(HypergraphZId, ArrayList(HypergraphZId)).init(self.allocator);
             const vertex = self.vertices.get(id).?;
             var it = vertex.relations.iterator();
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const hyperedge_id = kv.key_ptr.*;
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
@@ -351,7 +351,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             var adjacents = AutoArrayHashMap(HypergraphZId, ArrayList(HypergraphZId)).init(self.allocator);
             const vertex = self.vertices.get(id).?;
             var it = vertex.relations.iterator();
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const hyperedge_id = kv.key_ptr.*;
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
@@ -749,7 +749,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 var adjacentsWithWeight = AutoArrayHashMap(HypergraphZId, usize).init(self.allocator);
                 defer adjacentsWithWeight.deinit();
                 var it = result.data.iterator();
-                while (it.next()) |kv| {
+                while (it.next()) |*kv| {
                     const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                     const hWeight = hyperedge.data.weight;
                     for (kv.value_ptr.*.items) |v| {
@@ -759,7 +759,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
                 // Apply A* on the adjacent vertices.
                 var weighted_it = adjacentsWithWeight.iterator();
-                while (weighted_it.next()) |kv| {
+                while (weighted_it.next()) |*kv| {
                     const next = kv.key_ptr.*;
                     const new_cost = (cost_so_far.get(current) orelse 0) + kv.value_ptr.*;
                     if (!cost_so_far.contains(next) or new_cost < cost_so_far.get(next).?) {
@@ -773,7 +773,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             var it = came_from.iterator();
             var visited = AutoArrayHashMap(HypergraphZId, HypergraphZId).init(self.allocator);
             defer visited.deinit();
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const node = kv.value_ptr.*;
                 const origin = kv.key_ptr.*;
                 const dest = if (node) |n| n.from else 0;
@@ -877,7 +877,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 var result = try self.getVertexAdjacencyTo(d.*);
                 defer result.deinit();
                 var it_h = result.data.iterator();
-                while (it_h.next()) |kv| {
+                while (it_h.next()) |*kv| {
                     var h = self.hyperedges.getPtr(kv.key_ptr.*).?;
                     for (h.relations.items, 0..) |v, i| {
                         // In each hyperedge, replace the current vertex with the last one.
@@ -931,7 +931,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             const first_vertex = self.vertices.get(first_vertex_id).?;
             var it = first_vertex.relations.iterator();
             var deduped = AutoArrayHashMap(HypergraphZId, void).init(self.allocator);
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
                 var found_occurences: usize = 0;
                 for (hyperedge.relations.items) |v| {
@@ -982,7 +982,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn getEndpoints(self: *Self) HypergraphZError!EndpointsResult {
             var result = EndpointsResult.init(self.allocator);
             var it = self.hyperedges.iterator();
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const hyperedge = kv.value_ptr;
                 if (hyperedge.relations.items.len == 0) continue;
                 const hyperedge_id = kv.key_ptr.*;
@@ -1000,7 +1000,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn getOrphanHyperedges(self: *Self) HypergraphZError![]const HypergraphZId {
             var orphans = ArrayList(HypergraphZId).init(self.allocator);
             var it = self.hyperedges.iterator();
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const vertices = kv.value_ptr.relations;
                 if (vertices.items.len == 0) {
                     try orphans.append(kv.key_ptr.*);
@@ -1016,7 +1016,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn getOrphanVertices(self: *Self) HypergraphZError![]const HypergraphZId {
             var orphans = ArrayList(HypergraphZId).init(self.allocator);
             var it = self.vertices.iterator();
-            while (it.next()) |kv| {
+            while (it.next()) |*kv| {
                 const hyperedges = kv.value_ptr.relations;
                 if (hyperedges.count() == 0) {
                     try orphans.append(kv.key_ptr.*);
@@ -1601,7 +1601,7 @@ test "get vertex adjacency to" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_b);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1621,7 +1621,7 @@ test "get vertex adjacency to" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1641,7 +1641,7 @@ test "get vertex adjacency to" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1662,7 +1662,7 @@ test "get vertex adjacency to" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1682,7 +1682,7 @@ test "get vertex adjacency to" {
         try expect(result.data.count() == 3);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1715,7 +1715,7 @@ test "get vertex adjacency from" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1735,7 +1735,7 @@ test "get vertex adjacency from" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1755,7 +1755,7 @@ test "get vertex adjacency from" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1776,7 +1776,7 @@ test "get vertex adjacency from" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
                 try expect(kv.value_ptr.*.items.len == 1);
@@ -1796,7 +1796,7 @@ test "get vertex adjacency from" {
         try expect(result.data.count() == 2);
         var it = result.data.iterator();
         var i: usize = 0;
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_b);
                 try expect(kv.value_ptr.*.items.len == 2);
@@ -1951,7 +1951,7 @@ test "get hyperedges connecting vertices" {
         defer result.deinit();
         var i: usize = 0;
         var it = result.data.iterator();
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
             } else if (i == 1) {
@@ -1968,7 +1968,7 @@ test "get hyperedges connecting vertices" {
         var i: usize = 0;
         var it = result.data.iterator();
 
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_c);
             }
@@ -1983,7 +1983,7 @@ test "get hyperedges connecting vertices" {
         var i: usize = 0;
         var it = result.data.iterator();
 
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_a);
             } else if (i == 1) {
@@ -2000,7 +2000,7 @@ test "get hyperedges connecting vertices" {
         var i: usize = 0;
         var it = result.data.iterator();
 
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_c);
             }
@@ -2015,7 +2015,7 @@ test "get hyperedges connecting vertices" {
         var i: usize = 0;
         var it = result.data.iterator();
 
-        while (it.next()) |kv| {
+        while (it.next()) |*kv| {
             if (i == 0) {
                 try expect(kv.key_ptr.* == data.h_b);
             }
