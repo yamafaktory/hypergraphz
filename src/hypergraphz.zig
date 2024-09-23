@@ -37,9 +37,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// The allocator used by the HypergraphZ instance.
         allocator: Allocator,
         /// A hashmap of hyperedges.
-        hyperedges: AutoArrayHashMap(HypergraphZId, EntityArrayList(H)),
+        hyperedges: AutoArrayHashMap(HypergraphZId, HyperedgeDataRelations),
         /// A hashmap of vertices.
-        vertices: AutoArrayHashMap(HypergraphZId, EntityArrayHashMap(V)),
+        vertices: AutoArrayHashMap(HypergraphZId, VertexDataRelations),
         /// Internal counter for both the hyperedges and vertices ids.
         id_counter: usize = 0,
 
@@ -56,25 +56,17 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             assert(@typeInfo(V) == .Struct);
         }
 
-        /// Entity with data and relations as an array hashmap.
-        fn EntityArrayHashMap(
-            comptime D: type,
-        ) type {
-            return struct {
-                data: D,
-                relations: AutoArrayHashMap(HypergraphZId, void),
-            };
-        }
+        /// Vertex representation with data and relations as an array hashmap.
+        const VertexDataRelations = struct {
+            data: V,
+            relations: AutoArrayHashMap(HypergraphZId, void),
+        };
 
-        /// Entity with data and relations as an array list.
-        fn EntityArrayList(
-            comptime D: type,
-        ) type {
-            return struct {
-                data: D,
-                relations: ArrayList(HypergraphZId),
-            };
-        }
+        /// Hyperedge representation with data and relations as an array list.
+        const HyperedgeDataRelations = struct {
+            data: H,
+            relations: ArrayList(HypergraphZId),
+        };
 
         /// Configuration struct for the HypergraphZ instance.
         pub const HypergraphZConfig = struct {
@@ -88,8 +80,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn init(allocator: Allocator, config: HypergraphZConfig) HypergraphZError!Self {
             // We use an array list for hyperedges and an array hashmap for vertices.
             // The hyperedges can't be a hashmap since a hyperedge can contain the same vertex multiple times.
-            var h = AutoArrayHashMap(HypergraphZId, EntityArrayList(H)).init(allocator);
-            var v = AutoArrayHashMap(HypergraphZId, EntityArrayHashMap(V)).init(allocator);
+            var h = AutoArrayHashMap(HypergraphZId, HyperedgeDataRelations).init(allocator);
+            var v = AutoArrayHashMap(HypergraphZId, VertexDataRelations).init(allocator);
 
             if (config.hyperedges_capacity) |c| {
                 try h.ensureTotalCapacity(c);
