@@ -70,9 +70,9 @@ pub fn main() !void {
         var bench = try Bench.init(allocator, stdout, "generate 1_000 hyperedges with 1_000 vertices each in batches");
         for (0..1_000) |_| {
             vertices.clearRetainingCapacity();
-            const h = bench.graph.createHyperedgeAssumeCapacity(.{});
+            const h = try bench.graph.createHyperedgeAssumeCapacity(.{});
             for (0..1_000) |_| {
-                const id = bench.graph.createVertexAssumeCapacity(.{});
+                const id = try bench.graph.createVertexAssumeCapacity(.{});
                 try vertices.append(id);
             }
             try bench.graph.appendVerticesToHyperedge(h, vertices.items);
