@@ -17,7 +17,7 @@ const assert = std.debug.assert;
 const debug = std.log.debug;
 const window = std.mem.window;
 
-pub const HypergraphZId = usize;
+pub const HypergraphZId = u32;
 
 /// HypergraphZ errors.
 pub const HypergraphZError = (error{
@@ -37,14 +37,16 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// The allocator used by the HypergraphZ instance.
         allocator: Allocator,
-        /// A hashmap of hyperedges.
+        /// A hashmap of hyperedges data and relations.
         hyperedges: AutoArrayHashMap(HypergraphZId, HyperedgeDataRelations),
+        /// A memory pool for hyperedges data.
         hyperedges_pool: MemoryPool(H),
-        /// A hashmap of vertices.
+        /// A hashmap of vertices data and relations.
         vertices: AutoArrayHashMap(HypergraphZId, VertexDataRelations),
+        /// A memory pool for vertices data.
         vertices_pool: MemoryPool(V),
         /// Internal counter for both the hyperedges and vertices ids.
-        id_counter: usize = 0,
+        id_counter: HypergraphZId = 0,
 
         comptime {
             assert(@typeInfo(H) == .Struct);
@@ -86,20 +88,23 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             var h = AutoArrayHashMap(HypergraphZId, HyperedgeDataRelations).init(allocator);
             var v = AutoArrayHashMap(HypergraphZId, VertexDataRelations).init(allocator);
 
-            const hyperedges_pool = MemoryPool(H).init(allocator);
-            const vertices_pool = MemoryPool(V).init(allocator);
+            // Memory pools for hyperedges and vertices.
+            var h_pool = MemoryPool(H).init(allocator);
+            var v_pool = MemoryPool(V).init(allocator);
 
             if (config.hyperedges_capacity) |c| {
                 try h.ensureTotalCapacity(c);
                 assert(h.capacity() >= c);
+                h_pool = try MemoryPool(H).initPreheated(allocator, c);
             }
 
             if (config.vertices_capacity) |c| {
                 try v.ensureTotalCapacity(c);
                 assert(v.capacity() >= c);
+                v_pool = try MemoryPool(V).initPreheated(allocator, c);
             }
 
-            return .{ .allocator = allocator, .hyperedges = h, .vertices = v, .hyperedges_pool = hyperedges_pool, .vertices_pool = vertices_pool };
+            return .{ .allocator = allocator, .hyperedges = h, .vertices = v, .hyperedges_pool = h_pool, .vertices_pool = v_pool };
         }
 
         /// Deinit the HypergraphZ instance.
