@@ -1108,17 +1108,17 @@ fn generateTestData(graph: *HypergraphZ(Hyperedge, Vertex)) !Data {
     };
 }
 
-// test "allocation failure" {
-//     var failingAllocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
-//     var graph = try HypergraphZ(
-//         Hyperedge,
-//         Vertex,
-//     ).init(failingAllocator.allocator(), .{});
-//     defer graph.deinit();
-//
-//     _ = try graph.createVertex(.{});
-//     try expectError(HypergraphZError.OutOfMemory, graph.createHyperedge(.{}));
-// }
+test "allocation failure" {
+    var failingAllocator = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 1 });
+    var graph = try HypergraphZ(
+        Hyperedge,
+        Vertex,
+    ).init(failingAllocator.allocator(), .{});
+    defer graph.deinit();
+
+    // The following fails since two allocations are made.
+    try expectError(HypergraphZError.OutOfMemory, graph.createHyperedge(.{}));
+}
 
 test "create and get hyperedge" {
     var graph = try scaffold();
