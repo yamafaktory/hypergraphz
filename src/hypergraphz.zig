@@ -401,6 +401,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                     const vertex = self.vertices.getPtr(v);
                     // A vertex can appear multiple times within a hyperedge and thus might already be deleted.
                     if (vertex) |ptr| {
+                        // Remove from the vertices pool.
+                        self.vertices_pool.destroy(@alignCast(ptr.data));
+
                         // Release memory.
                         ptr.relations.deinit();
                         const removed = self.vertices.orderedRemove(v);
@@ -417,6 +420,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                     }
                 }
             }
+
+            // Remove from the hyperedges pool.
+            self.hyperedges_pool.destroy(hyperedge.data);
 
             // Release memory.
             hyperedge.relations.deinit();
@@ -449,6 +455,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 // Swap the temporary list with the hyperedge relations.
                 std.mem.swap(ArrayList(HypergraphZId), &hyperedge.relations, &tmp);
             }
+
+            // Remove from the vertices pool.
+            self.vertices_pool.destroy(@alignCast(vertex.data));
 
             // Release memory.
             vertex.relations.deinit();
