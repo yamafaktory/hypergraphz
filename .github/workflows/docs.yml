@@ -11,6 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v1
+        with:
+          version: 0.14.0-dev.2851+b074fb7dd 
       - run: zig build docs
       - uses: actions/upload-pages-artifact@v3
         with:
