@@ -49,16 +49,16 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         id_counter: HypergraphZId = 0,
 
         comptime {
-            assert(@typeInfo(H) == .Struct);
+            assert(@typeInfo(H) == .@"struct");
             var weightFieldType: ?type = null;
-            for (@typeInfo(H).Struct.fields) |*f| {
+            for (@typeInfo(H).@"struct".fields) |f| {
                 if (std.mem.eql(u8, f.name, "weight")) {
                     weightFieldType = f.type;
                 }
             }
-            const isWeightInt = if (weightFieldType) |w| @typeInfo(w) == .Int else false;
+            const isWeightInt = if (weightFieldType) |w| @typeInfo(w) == .int else false;
             assert(isWeightInt);
-            assert(@typeInfo(V) == .Struct);
+            assert(@typeInfo(V) == .@"struct");
         }
 
         /// Vertex representation with data and relations as an array hashmap.
