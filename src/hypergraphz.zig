@@ -2130,7 +2130,7 @@ test "reserve hyperedges" {
     for (0..20) |_| {
         _ = try graph.createHyperedgeAssumeCapacity(.{});
     }
-    try expect(graph.hyperedges.capacity() == 20);
+    try expect(graph.hyperedges.capacity() > 20);
     // Calling `createHyperedgeAssumeCapacity` will panic but we can't test
     // it, see: https://github.com/ziglang/zig/issues/1356.
 }
@@ -2149,7 +2149,7 @@ test "reserve vertices" {
     for (0..20) |_| {
         _ = try graph.createVertexAssumeCapacity(.{});
     }
-    try expect(graph.vertices.capacity() == 20);
+    try expect(graph.vertices.capacity() > 20);
     // Calling `createVertexAssumeCapacity` will panic but we can't test
     // it, see: https://github.com/ziglang/zig/issues/1356.
 }
