@@ -1,25 +1,13 @@
 const std = @import("std");
 const HypergraphZPath = "src/hypergraphz.zig";
+const BenchPath = "src/bench.zig";
 
-// Although this function looks imperative, note that its job is to
-// declaratively construct a build graph that will be executed by an external
-// runner.
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
-
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
-
     const root_source_file = b.path(HypergraphZPath);
 
-    // Export as module to be available via @import("hypergraphz").
-    _ = b.addModule("hypergraphz", .{
+    const root_module = b.addModule("hypergraphz", .{
         .root_source_file = root_source_file,
         .target = target,
         .optimize = optimize,
@@ -28,10 +16,7 @@ pub fn build(b: *std.Build) void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const unit_tests = b.addTest(.{
-        .root_source_file = root_source_file,
-        .target = target,
-        .optimize = optimize,
-        .filter = b.option([]const u8, "filter", "Filter strings for tests"),
+        .root_module = root_module,
     });
 
     const run_lib_unit_tests = b.addRunArtifact(unit_tests);
@@ -49,37 +34,41 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lib_unit_tests.step);
 
     // Generate docs step.
-    const lib = b.addStaticLibrary(.{
-        .name = "hypergraphz",
-        .target = target,
-        .optimize = optimize,
-        .root_source_file = root_source_file,
+    const docs_step = b.step("docs", "Build the HypergraphZ docs");
+    const docs_obj = b.addObject(.{
+        .name = "zeit",
+        .root_module = b.createModule(.{
+            .root_source_file = root_source_file,
+            .target = target,
+            .optimize = optimize,
+        }),
     });
-    const docs_step = b.step("docs", "Emit docs");
-    const docs_install = b.addInstallDirectory(.{
+    const docs = docs_obj.getEmittedDocs();
+    docs_step.dependOn(&b.addInstallDirectory(.{
+        .source_dir = docs,
         .install_dir = .prefix,
         .install_subdir = "docs",
-        .source_dir = lib.getEmittedDocs(),
-    });
-    docs_step.dependOn(&docs_install.step);
-    b.default_step.dependOn(docs_step);
+    }).step);
 
     // Check step used by the zls configuration.
     const check_step = b.step("check", "Check if HypergraphZ compiles");
     const check = b.addTest(.{
-        .root_source_file = root_source_file,
-        .target = target,
-        .optimize = .Debug,
+        .root_module = root_module,
     });
     check_step.dependOn(&check.step);
 
     // Bench step.
+    const bench_source_file = b.path(BenchPath);
+    const bench_module = b.addModule("bench", .{
+        .root_source_file = bench_source_file,
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
     const bench_step = b.step("bench", "Run benchmarks");
     const bench_exe = b.addExecutable(.{
         .name = "bench",
-        .root_source_file = b.path("src/bench.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
+        .root_module = bench_module,
     });
     const bench_run = b.addRunArtifact(bench_exe);
     if (b.args) |args| {

@@ -89,8 +89,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             var v: AutoArrayHashMapUnmanaged(HypergraphZId, VertexDataRelations) = .empty;
 
             // Memory pools for hyperedges and vertices.
-            var h_pool = MemoryPool(H).init(allocator);
-            var v_pool = MemoryPool(V).init(allocator);
+            var h_pool: MemoryPool(H) = .init(allocator);
+            var v_pool: MemoryPool(V) = .init(allocator);
 
             if (config.hyperedges_capacity) |c| {
                 try h.ensureTotalCapacity(allocator, c);
@@ -749,13 +749,13 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             try self.checkIfVertexExists(from);
             try self.checkIfVertexExists(to);
 
-            var arena = ArenaAllocator.init(self.allocator);
+            var arena: ArenaAllocator = .init(self.allocator);
             defer arena.deinit();
             const arena_allocator = arena.allocator();
 
             var came_from: CameFrom = .empty;
             var cost_so_far: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
-            var frontier = Queue.init(arena.allocator(), &came_from);
+            var frontier: Queue = .init(arena.allocator(), &came_from);
 
             try came_from.put(arena_allocator, from, null);
             try cost_so_far.put(arena_allocator, from, 0);
@@ -884,7 +884,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
             // Get the deduped vertices of the hyperedge.
             const hyperedge = self.hyperedges.getPtr(id).?;
-            var arena = ArenaAllocator.init(self.allocator);
+            var arena: ArenaAllocator = .init(self.allocator);
             defer arena.deinit();
             const arena_allocator = arena.allocator();
             var deduped: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
@@ -1004,7 +1004,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         };
         /// Get all the initial and terminal endpoints of all the hyperedges.
         pub fn getEndpoints(self: *Self) HypergraphZError!EndpointsResult {
-            var result = EndpointsResult.init(self.allocator);
+            var result: EndpointsResult = .init(self.allocator);
             var it = self.hyperedges.iterator();
             while (it.next()) |*kv| {
                 const hyperedge = kv.value_ptr;

@@ -2,7 +2,7 @@
     .name = .hypergraphz,
     .fingerprint = 0xc4efc93d2a1d228a,
     .version = "0.0.1",
-    .minimum_zig_version = "0.14.1",
+    .minimum_zig_version = "0.15.1",
     .paths = .{
         "LICENSE",
         "README.md",
