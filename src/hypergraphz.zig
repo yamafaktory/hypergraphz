@@ -586,7 +586,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
             // Prepend vertices to hyperedge relations.
             const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            try hyperedge.relations.insertSlice(std.testing.allocator, 0, vertices_ids);
+            try hyperedge.relations.insertSlice(self.allocator, 0, vertices_ids);
 
             for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
@@ -614,7 +614,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             // Prepend vertices to hyperedge relations.
-            try hyperedge.relations.insertSlice(std.testing.allocator, index, vertices_ids);
+            try hyperedge.relations.insertSlice(self.allocator, index, vertices_ids);
 
             for (vertices_ids) |id| {
                 const vertex = self.vertices.getPtr(id).?;
