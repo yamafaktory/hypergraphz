@@ -24,8 +24,12 @@ const Bench = struct {
     timer: Timer,
 
     pub fn init(allocator: Allocator, comptime name: []const u8) !Self {
+        var io_single = std.Io.Threaded.init_single_threaded;
+        defer io_single.deinit();
+
+        const io = io_single.io();
         var stdout_buffer: [1024]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
         const stdout = &stdout_writer.interface;
         const graph = try HypergraphZ(
             Hyperedge,

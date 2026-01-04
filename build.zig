@@ -36,7 +36,7 @@ pub fn build(b: *std.Build) void {
     // Generate docs step.
     const docs_step = b.step("docs", "Build the HypergraphZ docs");
     const docs_obj = b.addObject(.{
-        .name = "zeit",
+        .name = "HypergraphZ",
         .root_module = b.createModule(.{
             .root_source_file = root_source_file,
             .target = target,

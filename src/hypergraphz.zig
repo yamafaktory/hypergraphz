@@ -89,22 +89,28 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             var v: AutoArrayHashMapUnmanaged(HypergraphZId, VertexDataRelations) = .empty;
 
             // Memory pools for hyperedges and vertices.
-            var h_pool: MemoryPool(H) = .init(allocator);
-            var v_pool: MemoryPool(V) = .init(allocator);
+            var h_pool: MemoryPool(H) = .empty;
+            var v_pool: MemoryPool(V) = .empty;
 
             if (config.hyperedges_capacity) |c| {
                 try h.ensureTotalCapacity(allocator, c);
                 assert(h.capacity() >= c);
-                h_pool = try MemoryPool(H).initPreheated(allocator, c);
+                h_pool = try MemoryPool(H).initCapacity(allocator, c);
             }
 
             if (config.vertices_capacity) |c| {
                 try v.ensureTotalCapacity(allocator, c);
                 assert(v.capacity() >= c);
-                v_pool = try MemoryPool(V).initPreheated(allocator, c);
+                v_pool = try MemoryPool(V).initCapacity(allocator, c);
             }
 
-            return .{ .allocator = allocator, .hyperedges = h, .vertices = v, .hyperedges_pool = h_pool, .vertices_pool = v_pool };
+            return .{
+                .allocator = allocator,
+                .hyperedges = h,
+                .vertices = v,
+                .hyperedges_pool = h_pool,
+                .vertices_pool = v_pool,
+            };
         }
 
         /// Deinit the HypergraphZ instance.
@@ -124,8 +130,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Finally deinit all entities and the struct itself.
             self.hyperedges.deinit(self.allocator);
             self.vertices.deinit(self.allocator);
-            self.hyperedges_pool.deinit();
-            self.vertices_pool.deinit();
+            self.hyperedges_pool.deinit(self.allocator);
+            self.vertices_pool.deinit(self.allocator);
             self.* = undefined;
         }
 
@@ -138,7 +144,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Create a new hyperedge.
         pub fn createHyperedge(self: *Self, hyperedge: H) HypergraphZError!HypergraphZId {
             const id = self._getId();
-            const h = try self.hyperedges_pool.create();
+            const h = try self.hyperedges_pool.create(self.allocator);
             h.* = hyperedge;
             try self.hyperedges.put(self.allocator, id, .{ .relations = .empty, .data = h });
 
@@ -148,9 +154,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Create a new hyperedge assuming there is enough capacity.
         pub fn createHyperedgeAssumeCapacity(self: *Self, hyperedge: H) HypergraphZError!HypergraphZId {
             const id = self._getId();
-            const h = try self.hyperedges_pool.create();
+            const h = try self.hyperedges_pool.create(self.allocator);
             h.* = hyperedge;
-            self.hyperedges.putAssumeCapacity(id, .{ .relations = .empty, .data = h });
+            self.hyperedges.putAssumeCapacity(id, .{
+                .relations = .empty,
+                .data = h,
+            });
 
             return id;
         }
@@ -163,9 +172,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Create a new vertex.
         pub fn createVertex(self: *Self, vertex: V) HypergraphZError!HypergraphZId {
             const id = self._getId();
-            const v = try self.vertices_pool.create();
+            const v = try self.vertices_pool.create(self.allocator);
             v.* = vertex;
-            try self.vertices.put(self.allocator, id, .{ .relations = .empty, .data = v });
+            try self.vertices.put(self.allocator, id, .{
+                .relations = .empty,
+                .data = v,
+            });
 
             return id;
         }
@@ -173,9 +185,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Create a new vertex assuming there is enough capacity.
         pub fn createVertexAssumeCapacity(self: *Self, vertex: V) HypergraphZError!HypergraphZId {
             const id = self._getId();
-            const v = try self.vertices_pool.create();
+            const v = try self.vertices_pool.create(self.allocator);
             v.* = vertex;
-            self.vertices.putAssumeCapacity(id, .{ .relations = .empty, .data = v });
+            self.vertices.putAssumeCapacity(id, .{
+                .relations = .empty,
+                .data = v,
+            });
 
             return id;
         }
@@ -787,7 +802,10 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                     const new_cost = (cost_so_far.get(current) orelse 0) + kv.value_ptr.*;
                     if (!cost_so_far.contains(next) or new_cost < cost_so_far.get(next).?) {
                         try cost_so_far.put(arena_allocator, next, new_cost);
-                        try came_from.put(arena_allocator, next, .{ .weight = kv.value_ptr.*, .from = current });
+                        try came_from.put(arena_allocator, next, .{
+                            .weight = kv.value_ptr.*,
+                            .from = current,
+                        });
                         try frontier.add(next);
                     }
                 }
@@ -1062,6 +1080,7 @@ const Hyperedge = struct { meow: bool = false, weight: usize = 1 };
 const Vertex = struct { purr: bool = false };
 
 fn scaffold() HypergraphZError!HypergraphZ(Hyperedge, Vertex) {
+    // Currently running the tests works as expected but we get `failed command: ./zig-cache/...`.
     std.testing.log_level = .debug;
 
     const graph = try HypergraphZ(
