@@ -2,6 +2,20 @@
 //! https://en.wikipedia.org/wiki/Hypergraph
 //! Each hyperedge can contain zero, one (unary) or multiple vertices.
 //! Each hyperedge can contain vertices directed to themselves one or more times.
+//!
+//! ## Two-phase design
+//!
+//! HypergraphZ uses a two-phase model to allow fast bulk construction of large graphs:
+//!
+//! - **Build phase** (default after `init`): insertion operations are fast because they only
+//!   update the forward index (hyperedge → vertices). The reverse index (vertex → hyperedges)
+//!   is not maintained. Query operations that require the reverse index return
+//!   `HypergraphZError.NotBuilt`.
+//! - **Query phase** (after calling `build()`): all operations are available. Subsequent
+//!   mutations maintain the reverse index incrementally so `build()` need not be called again
+//!   unless a large batch of insertions makes a full rebuild desirable.
+//!
+//! Call `build()` once after the initial bulk load, then query freely.
 
 const std = @import("std");
 
@@ -24,6 +38,7 @@ pub const HypergraphZError = (error{
     HyperedgeNotFound,
     IndexOutOfBounds,
     NoVerticesToInsert,
+    NotBuilt,
     NotEnoughHyperedgesProvided,
     VertexNotFound,
 } || Allocator.Error);
@@ -47,6 +62,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         vertices_pool: MemoryPool(V),
         /// Internal counter for both the hyperedges and vertices ids.
         id_counter: HypergraphZId = 0,
+        /// Whether the reverse index (vertex → hyperedges) has been built.
+        /// Set to `true` by `build()`, reset to `false` by `clear()`.
+        /// When `false`, insertion operations skip the reverse index for performance;
+        /// query operations that require it return `HypergraphZError.NotBuilt`.
+        is_built: bool = false,
 
         comptime {
             assert(@typeInfo(H) == .@"struct");
@@ -61,10 +81,10 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             assert(@typeInfo(V) == .@"struct");
         }
 
-        /// Vertex representation with data and relations as an array hashmap.
+        /// Vertex representation with data and relations as an array list.
         const VertexDataRelations = struct {
             data: *V,
-            relations: AutoArrayHashMapUnmanaged(HypergraphZId, void),
+            relations: ArrayListUnmanaged(HypergraphZId),
         };
 
         /// Hyperedge representation with data and relations as an array list.
@@ -200,6 +220,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             try self.vertices.ensureUnusedCapacity(self.allocator, additional_capacity);
         }
 
+        /// Reserve capacity for additional vertices in a hyperedge.
+        pub fn reserveHyperedgeVertices(self: *Self, hyperedge_id: HypergraphZId, additional: usize) HypergraphZError!void {
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
+            try hyperedge.relations.ensureUnusedCapacity(self.allocator, additional);
+        }
+
         /// Count the number of hyperedges.
         pub fn countHyperedges(self: *Self) usize {
             return self.hyperedges.count();
@@ -212,20 +238,99 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Check if an hyperedge exists.
         pub fn checkIfHyperedgeExists(self: *Self, id: HypergraphZId) HypergraphZError!void {
-            if (!self.hyperedges.contains(id)) {
-                debug("hyperedge {} not found", .{id});
-
-                return HypergraphZError.HyperedgeNotFound;
-            }
+            _ = try self._hyperedgePtr(id);
         }
 
         /// Check if a vertex exists.
         pub fn checkIfVertexExists(self: *Self, id: HypergraphZId) HypergraphZError!void {
-            if (!self.vertices.contains(id)) {
-                debug("vertex {} not found", .{id});
+            _ = try self._vertexPtr(id);
+        }
 
+        fn _hyperedgePtr(self: *Self, id: HypergraphZId) HypergraphZError!*HyperedgeDataRelations {
+            return self.hyperedges.getPtr(id) orelse {
+                debug("hyperedge {} not found", .{id});
+                return HypergraphZError.HyperedgeNotFound;
+            };
+        }
+
+        fn _vertexPtr(self: *Self, id: HypergraphZId) HypergraphZError!*VertexDataRelations {
+            return self.vertices.getPtr(id) orelse {
+                debug("vertex {} not found", .{id});
                 return HypergraphZError.VertexNotFound;
+            };
+        }
+
+        fn _addVertexRelation(self: *Self, vertex: *VertexDataRelations, hyperedge_id: HypergraphZId) !void {
+            for (vertex.relations.items) |h| {
+                if (h == hyperedge_id) return;
             }
+            try vertex.relations.append(self.allocator, hyperedge_id);
+        }
+
+        fn _removeVertexRelation(vertex: *VertexDataRelations, hyperedge_id: HypergraphZId) bool {
+            for (vertex.relations.items, 0..) |h, i| {
+                if (h == hyperedge_id) {
+                    _ = vertex.relations.orderedRemove(i);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// Build the reverse index (vertex → hyperedges) from the forward index.
+        ///
+        /// HypergraphZ uses a two-phase model:
+        /// - **Build phase** (default after `init`): insertion operations are fast because
+        ///   they only update the forward index (hyperedge → vertices). The reverse index
+        ///   (vertex → hyperedges) is not maintained, so queries that traverse it are
+        ///   unavailable and return `HypergraphZError.NotBuilt`.
+        /// - **Query phase** (after `build()`): all operations are available. Subsequent
+        ///   mutations maintain the reverse index incrementally, so `build()` need not be
+        ///   called again unless a large batch of insertions makes a full rebuild desirable.
+        ///
+        /// `build()` scans all hyperedges once and constructs the complete reverse index.
+        /// It is idempotent: calling it multiple times is safe and rebuilds from scratch
+        /// each time.
+        ///
+        /// Typical usage for large graphs:
+        /// ```zig
+        /// // Fast build phase — no reverse-index overhead.
+        /// for (raw_edges) |edge| {
+        ///     const h = try graph.createHyperedge(edge.data);
+        ///     try graph.appendVerticesToHyperedge(h, edge.vertices);
+        /// }
+        /// // Build reverse index once, then query freely.
+        /// try graph.build();
+        /// const degree = try graph.getVertexIndegree(some_vertex);
+        /// ```
+        pub fn build(self: *Self) HypergraphZError!void {
+            // Clear any existing reverse index entries.
+            {
+                var it = self.vertices.iterator();
+                while (it.next()) |*kv| {
+                    kv.value_ptr.relations.clearRetainingCapacity();
+                }
+            }
+
+            // Rebuild from the forward index.
+            // _addVertexRelation handles deduplication: a vertex appearing multiple
+            // times in a hyperedge is recorded only once in the reverse index.
+            {
+                var it = self.hyperedges.iterator();
+                while (it.next()) |*kv| {
+                    const hyperedge_id = kv.key_ptr.*;
+                    for (kv.value_ptr.relations.items) |vertex_id| {
+                        const vertex = self.vertices.getPtr(vertex_id).?;
+                        try self._addVertexRelation(vertex, hyperedge_id);
+                    }
+                }
+            }
+
+            self.is_built = true;
+            debug("reverse index built: {} vertices, {} hyperedges", .{
+                self.vertices.count(),
+                self.hyperedges.count(),
+            });
         }
 
         /// Get a hyperedge.
@@ -247,45 +352,43 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Get all the hyperedges.
-        pub fn getAllHyperedges(self: *Self) []HypergraphZId {
+        pub fn getAllHyperedges(self: *Self) []const HypergraphZId {
             return self.hyperedges.keys();
         }
 
         /// Get all the vertices.
-        pub fn getAllVertices(self: *Self) []HypergraphZId {
+        pub fn getAllVertices(self: *Self) []const HypergraphZId {
             return self.vertices.keys();
         }
 
         /// Update a hyperedge.
         pub fn updateHyperedge(self: *Self, id: HypergraphZId, hyperedge: H) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(id);
-
-            self.hyperedges.getPtr(id).?.data.* = hyperedge;
+            const h = try self._hyperedgePtr(id);
+            h.data.* = hyperedge;
         }
 
         /// Update a vertex.
         pub fn updateVertex(self: *Self, id: HypergraphZId, vertex: V) HypergraphZError!void {
-            try self.checkIfVertexExists(id);
-
-            self.vertices.getPtr(id).?.data.* = vertex;
+            const v = try self._vertexPtr(id);
+            v.data.* = vertex;
         }
 
         /// Get the indegree of a vertex.
         /// Note that a vertex can be directed to itself multiple times.
         /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
         pub fn getVertexIndegree(self: *Self, id: HypergraphZId) HypergraphZError!usize {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.get(id).?;
             var indegree: usize = 0;
-            var it = vertex.relations.iterator();
-            while (it.next()) |*kv| {
-                const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
+            for (vertex.relations.items) |hyperedge_id| {
+                const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
                     var wIt = window(HypergraphZId, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
-                        if (v[0] == id) {
+                        if (v[1] == id) {
                             indegree += 1;
                         }
                     }
@@ -295,22 +398,22 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             return indegree;
         }
 
-        /// Get the indegree of a vertex.
+        /// Get the outdegree of a vertex.
         /// Note that a vertex can be directed to itself multiple times.
         /// https://en.wikipedia.org/wiki/Directed_graph#Indegree_and_outdegree
         pub fn getVertexOutdegree(self: *Self, id: HypergraphZId) HypergraphZError!usize {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
             try self.checkIfVertexExists(id);
 
             const vertex = self.vertices.get(id).?;
             var outdegree: usize = 0;
-            var it = vertex.relations.iterator();
-            while (it.next()) |*kv| {
-                const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
+            for (vertex.relations.items) |hyperedge_id| {
+                const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
                     var wIt = window(HypergraphZId, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |v| {
-                        if (v[1] == id) {
+                        if (v[0] == id) {
                             outdegree += 1;
                         }
                     }
@@ -340,14 +443,13 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Get the adjacents vertices connected to a vertex.
         /// The caller is responsible for freeing the result memory with `denit`.
         pub fn getVertexAdjacencyTo(self: *Self, id: HypergraphZId) HypergraphZError!AdjacencyResult {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
             try self.checkIfVertexExists(id);
 
             // We don't need to release the memory here since the caller will do it.
             var adjacents: AutoArrayHashMapUnmanaged(HypergraphZId, ArrayListUnmanaged(HypergraphZId)) = .empty;
             const vertex = self.vertices.get(id).?;
-            var it = vertex.relations.iterator();
-            while (it.next()) |*kv| {
-                const hyperedge_id = kv.key_ptr.*;
+            for (vertex.relations.items) |hyperedge_id| {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
@@ -373,14 +475,13 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Get the adjacents vertices connected from a vertex.
         /// The caller is responsible for freeing the result memory with `denit`.
         pub fn getVertexAdjacencyFrom(self: *Self, id: HypergraphZId) HypergraphZError!AdjacencyResult {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
             try self.checkIfVertexExists(id);
 
             // We don't need to release the memory here since the caller will do it.
             var adjacents: AutoArrayHashMapUnmanaged(HypergraphZId, ArrayListUnmanaged(HypergraphZId)) = .empty;
             const vertex = self.vertices.get(id).?;
-            var it = vertex.relations.iterator();
-            while (it.next()) |*kv| {
-                const hyperedge_id = kv.key_ptr.*;
+            for (vertex.relations.items) |hyperedge_id| {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 if (hyperedge.relations.items.len > 0) {
                     // Use a window iterator over the hyperedge relations.
@@ -405,9 +506,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Delete a hyperedge.
         pub fn deleteHyperedge(self: *Self, id: HypergraphZId, drop_vertices: bool) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(id);
-
-            const hyperedge = self.hyperedges.getPtr(id).?;
+            const hyperedge = try self._hyperedgePtr(id);
             const vertices = hyperedge.relations.items;
 
             if (drop_vertices) {
@@ -431,7 +530,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                     const vertex = self.vertices.getPtr(v);
                     // A vertex can appear multiple times within a hyperedge and thus might already be deleted.
                     if (vertex) |ptr| {
-                        _ = ptr.relations.orderedRemove(id);
+                        _ = _removeVertexRelation(ptr, id);
                     }
                 }
             }
@@ -451,10 +550,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Delete a vertex.
         pub fn deleteVertex(self: *Self, id: HypergraphZId) HypergraphZError!void {
-            try self.checkIfVertexExists(id);
-
-            const vertex = self.vertices.getPtr(id).?;
-            const hyperedges = vertex.relations.keys();
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+            const vertex = try self._vertexPtr(id);
+            const hyperedges = vertex.relations.items;
             for (hyperedges) |h| {
                 const hyperedge = self.hyperedges.getPtr(h).?;
                 // Delete the vertex from the hyperedge relations.
@@ -485,35 +583,32 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Get all vertices of a hyperedge as a slice.
-        pub fn getHyperedgeVertices(self: *Self, hyperedge_id: HypergraphZId) HypergraphZError![]HypergraphZId {
-            try self.checkIfHyperedgeExists(hyperedge_id);
-
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
+        pub fn getHyperedgeVertices(self: *Self, hyperedge_id: HypergraphZId) HypergraphZError![]const HypergraphZId {
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
 
             return hyperedge.relations.items;
         }
 
         /// Get all hyperedges of a vertex as a slice.
-        pub fn getVertexHyperedges(self: *Self, vertex_id: HypergraphZId) HypergraphZError![]HypergraphZId {
-            try self.checkIfVertexExists(vertex_id);
+        pub fn getVertexHyperedges(self: *Self, vertex_id: HypergraphZId) HypergraphZError![]const HypergraphZId {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+            const vertex = try self._vertexPtr(vertex_id);
 
-            const vertex = self.vertices.getPtr(vertex_id).?;
-
-            return vertex.relations.keys();
+            return vertex.relations.items;
         }
 
         /// Append a vertex to a hyperedge.
+        /// In the build phase (before `build()` is called), only the forward index
+        /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn appendVertexToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_id: HypergraphZId) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(hyperedge_id);
-            try self.checkIfVertexExists(vertex_id);
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
+            const vertex = try self._vertexPtr(vertex_id);
 
             // Append vertex to hyperedge relations.
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             try hyperedge.relations.append(self.allocator, vertex_id);
 
-            // Add hyperedge to vertex relations.
-            const vertex = self.vertices.getPtr(vertex_id).?;
-            try vertex.relations.put(self.allocator, hyperedge_id, {});
+            // Add hyperedge to vertex relations (skipped in build phase).
+            if (self.is_built) try self._addVertexRelation(vertex, hyperedge_id);
 
             debug("vertex {} appended to hyperedge {}", .{
                 vertex_id,
@@ -522,17 +617,17 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Prepend a vertex to a hyperedge.
+        /// In the build phase (before `build()` is called), only the forward index
+        /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn prependVertexToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_id: HypergraphZId) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(hyperedge_id);
-            try self.checkIfVertexExists(vertex_id);
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
+            const vertex = try self._vertexPtr(vertex_id);
 
             // Prepend vertex to hyperedge relations.
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             try hyperedge.relations.insertSlice(self.allocator, 0, &.{vertex_id});
 
-            // Add hyperedge to vertex relations.
-            const vertex = self.vertices.getPtr(vertex_id).?;
-            try vertex.relations.put(self.allocator, hyperedge_id, {});
+            // Add hyperedge to vertex relations (skipped in build phase).
+            if (self.is_built) try self._addVertexRelation(vertex, hyperedge_id);
 
             debug("vertex {} prepended to hyperedge {}", .{
                 vertex_id,
@@ -541,11 +636,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Insert a vertex into a hyperedge at a given index.
+        /// In the build phase (before `build()` is called), only the forward index
+        /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn insertVertexIntoHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_id: HypergraphZId, index: usize) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(hyperedge_id);
-            try self.checkIfVertexExists(vertex_id);
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
+            const vertex = try self._vertexPtr(vertex_id);
 
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
             if (index > hyperedge.relations.items.len) {
                 return HypergraphZError.IndexOutOfBounds;
             }
@@ -553,8 +649,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Insert vertex into hyperedge relations at given index.
             try hyperedge.relations.insert(self.allocator, index, vertex_id);
 
-            const vertex = self.vertices.getPtr(vertex_id).?;
-            try vertex.relations.put(self.allocator, hyperedge_id, {});
+            // Add hyperedge to vertex relations (skipped in build phase).
+            if (self.is_built) try self._addVertexRelation(vertex, hyperedge_id);
 
             debug("vertex {} inserted into hyperedge {} at index {}", .{
                 vertex_id,
@@ -564,76 +660,88 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Append vertices to a hyperedge.
+        /// In the build phase (before `build()` is called), only the forward index
+        /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn appendVerticesToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_ids: []const HypergraphZId) HypergraphZError!void {
             if (vertex_ids.len == 0) {
                 debug("no vertices to append to hyperedge {}, skipping", .{hyperedge_id});
                 return;
             }
 
-            try self.checkIfHyperedgeExists(hyperedge_id);
             for (vertex_ids) |v| {
                 try self.checkIfVertexExists(v);
             }
 
             // Append vertices to hyperedge relations.
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
             try hyperedge.relations.appendSlice(self.allocator, vertex_ids);
 
-            for (vertex_ids) |id| {
-                const vertex = self.vertices.getPtr(id).?;
-                try vertex.relations.put(self.allocator, hyperedge_id, {});
+            // Add hyperedge to vertex relations (skipped in build phase).
+            if (self.is_built) {
+                for (vertex_ids) |id| {
+                    const vertex = self.vertices.getPtr(id).?;
+                    try self._addVertexRelation(vertex, hyperedge_id);
+                }
             }
 
             debug("vertices appended to hyperedge {}", .{hyperedge_id});
         }
 
         /// Prepend vertices to a hyperedge.
+        /// In the build phase (before `build()` is called), only the forward index
+        /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn prependVerticesToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertices_ids: []const HypergraphZId) HypergraphZError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to prepend to hyperedge {}, skipping", .{hyperedge_id});
                 return;
             }
 
-            try self.checkIfHyperedgeExists(hyperedge_id);
             for (vertices_ids) |v| {
                 try self.checkIfVertexExists(v);
             }
 
             // Prepend vertices to hyperedge relations.
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
             try hyperedge.relations.insertSlice(self.allocator, 0, vertices_ids);
 
-            for (vertices_ids) |id| {
-                const vertex = self.vertices.getPtr(id).?;
-                try vertex.relations.put(self.allocator, hyperedge_id, {});
+            // Add hyperedge to vertex relations (skipped in build phase).
+            if (self.is_built) {
+                for (vertices_ids) |id| {
+                    const vertex = self.vertices.getPtr(id).?;
+                    try self._addVertexRelation(vertex, hyperedge_id);
+                }
             }
 
             debug("vertices prepended to hyperedge {}", .{hyperedge_id});
         }
 
         /// Insert vertices into a hyperedge at a given index.
+        /// In the build phase (before `build()` is called), only the forward index
+        /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertices_ids: []const HypergraphZId, index: usize) HypergraphZError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to insert into hyperedge {}, skipping", .{hyperedge_id});
                 return HypergraphZError.NoVerticesToInsert;
             }
 
-            try self.checkIfHyperedgeExists(hyperedge_id);
             for (vertices_ids) |v| {
                 try self.checkIfVertexExists(v);
             }
 
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
             if (index > hyperedge.relations.items.len) {
                 return HypergraphZError.IndexOutOfBounds;
             }
 
-            // Prepend vertices to hyperedge relations.
+            // Insert vertices into hyperedge relations at given index.
             try hyperedge.relations.insertSlice(self.allocator, index, vertices_ids);
 
-            for (vertices_ids) |id| {
-                const vertex = self.vertices.getPtr(id).?;
-                try vertex.relations.put(self.allocator, hyperedge_id, {});
+            // Add hyperedge to vertex relations (skipped in build phase).
+            if (self.is_built) {
+                for (vertices_ids) |id| {
+                    const vertex = self.vertices.getPtr(id).?;
+                    try self._addVertexRelation(vertex, hyperedge_id);
+                }
             }
 
             debug("vertices inserted into hyperedge {} at index {}", .{ hyperedge_id, index });
@@ -641,10 +749,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Delete a vertex from a hyperedge.
         pub fn deleteVertexFromHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_id: HypergraphZId) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(hyperedge_id);
-            try self.checkIfVertexExists(vertex_id);
-
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
 
             // The same vertex can appear multiple times within a hyperedge.
             // Create a temporary list to store the relations without the vertex.
@@ -658,18 +764,17 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Swap the temporary list with the hyperedge relations.
             std.mem.swap(ArrayListUnmanaged(HypergraphZId), &hyperedge.relations, &tmp);
 
-            const vertex = self.vertices.getPtr(vertex_id).?;
-            const removed = vertex.relations.orderedRemove(hyperedge_id);
+            const vertex = try self._vertexPtr(vertex_id);
+            const removed = _removeVertexRelation(vertex, hyperedge_id);
             assert(removed);
             debug("vertice {} deleted from hyperedge {}", .{ vertex_id, hyperedge_id });
         }
 
         /// Delete a vertex from a hyperedge at a given index.
         pub fn deleteVertexByIndexFromHyperedge(self: *Self, hyperedge_id: HypergraphZId, index: usize) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(hyperedge_id);
-
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
-            if (index > hyperedge.relations.items.len) {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
+            if (index >= hyperedge.relations.items.len) {
                 return HypergraphZError.IndexOutOfBounds;
             }
 
@@ -683,7 +788,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                     break;
                 }
             } else {
-                const removed = vertex.relations.orderedRemove(hyperedge_id);
+                const removed = _removeVertexRelation(vertex, hyperedge_id);
                 assert(removed);
             }
 
@@ -743,17 +848,16 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         const CameFrom = AutoHashMapUnmanaged(HypergraphZId, ?Node);
         const Queue = PriorityQueue(HypergraphZId, *const CameFrom, compareNode);
         fn compareNode(map: *const CameFrom, n1: HypergraphZId, n2: HypergraphZId) std.math.Order {
-            const node1 = map.get(n1).?;
-            const node2 = map.get(n2).?;
-
-            return std.math.order(node1.?.weight, node2.?.weight);
+            const w1: usize = if (map.get(n1)) |n| if (n) |e| e.weight else 0 else 0;
+            const w2: usize = if (map.get(n2)) |n| if (n) |e| e.weight else 0 else 0;
+            return std.math.order(w1, w2);
         }
         /// Struct containing the shortest path as a list of vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const ShortestPathResult = struct {
             data: ?ArrayListUnmanaged(HypergraphZId),
 
-            fn deinit(self: *ShortestPathResult, allocator: Allocator) void {
+            pub fn deinit(self: *ShortestPathResult, allocator: Allocator) void {
                 if (self.data) |*d| d.deinit(allocator);
                 self.* = undefined;
             }
@@ -761,6 +865,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Find the shortest path between two vertices using the A* algorithm.
         /// The caller is responsible for freeing the result memory with `deinit`.
         pub fn findShortestPath(self: *Self, from: HypergraphZId, to: HypergraphZId) HypergraphZError!ShortestPathResult {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
             try self.checkIfVertexExists(from);
             try self.checkIfVertexExists(to);
 
@@ -781,62 +886,45 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
                 if (current == to) break;
 
-                // Get adjacent vertices and their weights from the current hyperedge.
-                var result = try self.getVertexAdjacencyFrom(current);
-                defer result.deinit(self.allocator);
-                var adjacentsWithWeight: AutoArrayHashMapUnmanaged(HypergraphZId, usize) = .empty;
-                defer adjacentsWithWeight.deinit(self.allocator);
-                var it = result.data.iterator();
-                while (it.next()) |*kv| {
-                    const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
-                    const hWeight = hyperedge.data.weight;
-                    for (kv.value_ptr.*.items) |v| {
-                        try adjacentsWithWeight.put(self.allocator, v, hWeight);
-                    }
-                }
-
-                // Apply A* on the adjacent vertices.
-                var weighted_it = adjacentsWithWeight.iterator();
-                while (weighted_it.next()) |*kv| {
-                    const next = kv.key_ptr.*;
-                    const new_cost = (cost_so_far.get(current) orelse 0) + kv.value_ptr.*;
-                    if (!cost_so_far.contains(next) or new_cost < cost_so_far.get(next).?) {
-                        try cost_so_far.put(arena_allocator, next, new_cost);
-                        try came_from.put(arena_allocator, next, .{
-                            .weight = kv.value_ptr.*,
-                            .from = current,
-                        });
-                        try frontier.add(next);
+                // Inline adjacency traversal to avoid allocations per iteration.
+                const current_cost = cost_so_far.get(current) orelse 0;
+                const vertex = self.vertices.get(current).?;
+                for (vertex.relations.items) |hyperedge_id| {
+                    const hyperedge = self.hyperedges.get(hyperedge_id).?;
+                    const weight = hyperedge.data.weight;
+                    var wIt = window(HypergraphZId, hyperedge.relations.items, 2, 1);
+                    while (wIt.next()) |pair| {
+                        if (pair[0] != current) continue;
+                        const next = pair[1];
+                        const new_cost = current_cost + weight;
+                        const existing = cost_so_far.get(next);
+                        if (existing == null or new_cost < existing.?) {
+                            try cost_so_far.put(arena_allocator, next, new_cost);
+                            try came_from.put(arena_allocator, next, .{
+                                .weight = new_cost,
+                                .from = current,
+                            });
+                            try frontier.add(next);
+                        }
                     }
                 }
             }
 
-            var it = came_from.iterator();
-            var visited: AutoArrayHashMapUnmanaged(HypergraphZId, HypergraphZId) = .empty;
-            defer visited.deinit(self.allocator);
-            while (it.next()) |*kv| {
-                const node = kv.value_ptr.*;
-                const origin = kv.key_ptr.*;
-                const dest = if (node) |n| n.from else 0;
-                try visited.put(self.allocator, origin, dest);
-            }
-
-            var last = visited.get(to);
-
-            if (last == null) {
+            // Check if path was found.
+            if (!came_from.contains(to)) {
                 debug("no path found between {} and {}", .{ from, to });
                 return .{ .data = null };
             }
 
-            // We iterate in reverse order.
+            // Reconstruct path by walking came_from backward from `to`.
             var path: ArrayListUnmanaged(HypergraphZId) = .empty;
             try path.append(self.allocator, to);
-            while (true) {
-                if (last == 0) break;
-                try path.append(self.allocator, last.?);
-                const next = visited.get(last.?);
-                if (next == null or next == 0) break;
-                last = next;
+            var cursor = to;
+            while (came_from.get(cursor)) |entry| {
+                if (entry) |e| {
+                    try path.append(self.allocator, e.from);
+                    cursor = e.from;
+                } else break;
             }
             std.mem.reverse(HypergraphZId, path.items);
 
@@ -846,9 +934,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Reverse a hyperedge.
         pub fn reverseHyperedge(self: *Self, hyperedge_id: HypergraphZId) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(hyperedge_id);
-
-            const hyperedge = self.hyperedges.getPtr(hyperedge_id).?;
+            const hyperedge = try self._hyperedgePtr(hyperedge_id);
             const tmp = try hyperedge.relations.toOwnedSlice(self.allocator);
             std.mem.reverse(HypergraphZId, tmp);
             hyperedge.relations = ArrayListUnmanaged(HypergraphZId).fromOwnedSlice(tmp);
@@ -880,7 +966,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 for (vertices) |v| {
                     // We can't assert that the removal is truthy since a vertex can appear multiple times within a hyperedge.
                     const vertex = self.vertices.getPtr(v);
-                    _ = vertex.?.relations.orderedRemove(h);
+                    _ = _removeVertexRelation(vertex.?, h);
                 }
 
                 // Release memory.
@@ -898,10 +984,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// The resulting vertex will be the last vertex in the hyperedge.
         /// https://en.wikipedia.org/wiki/Edge_contraction
         pub fn contractHyperedge(self: *Self, id: HypergraphZId) HypergraphZError!void {
-            try self.checkIfHyperedgeExists(id);
-
+            if (!self.is_built) return HypergraphZError.NotBuilt;
             // Get the deduped vertices of the hyperedge.
-            const hyperedge = self.hyperedges.getPtr(id).?;
+            const hyperedge = try self._hyperedgePtr(id);
             var arena: ArenaAllocator = .init(self.allocator);
             defer arena.deinit();
             const arena_allocator = arena.allocator();
@@ -935,7 +1020,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
                 // Delete the hyperedge from the vertex relations.
                 const vertex = self.vertices.getPtr(d.*).?;
-                const removed = vertex.relations.orderedRemove(id);
+                const removed = _removeVertexRelation(vertex, id);
                 assert(removed);
             }
 
@@ -950,6 +1035,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn clear(self: *Self) void {
             self.hyperedges.clearAndFree(self.allocator);
             self.vertices.clearAndFree(self.allocator);
+            self.is_built = false;
         }
 
         /// Struct containing the hyperedges as a hashset whose keys are
@@ -966,15 +1052,15 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Get all the hyperedges connecting two vertices.
         /// This method returns an owned slice which must be freed by the caller.
         pub fn getHyperedgesConnecting(self: *Self, first_vertex_id: HypergraphZId, second_vertex_id: HypergraphZId) HypergraphZError!HyperedgesResult {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
             try self.checkIfVertexExists(first_vertex_id);
             try self.checkIfVertexExists(second_vertex_id);
 
             const eq = first_vertex_id == second_vertex_id;
             const first_vertex = self.vertices.get(first_vertex_id).?;
-            var it = first_vertex.relations.iterator();
             var deduped: AutoArrayHashMapUnmanaged(HypergraphZId, void) = .empty;
-            while (it.next()) |*kv| {
-                const hyperedge = self.hyperedges.get(kv.key_ptr.*).?;
+            for (first_vertex.relations.items) |hyperedge_id| {
+                const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 var found_occurences: usize = 0;
                 for (hyperedge.relations.items) |v| {
                     if (v == second_vertex_id) {
@@ -983,7 +1069,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
                 // We need to take care of potential self-loops.
                 if ((eq and found_occurences > 1) or (!eq and found_occurences > 0)) {
-                    try deduped.put(self.allocator, kv.key_ptr.*, {});
+                    try deduped.put(self.allocator, hyperedge_id, {});
                 }
             }
 
@@ -1056,11 +1142,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Get the orphan vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub fn getOrphanVertices(self: *Self) HypergraphZError![]const HypergraphZId {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
             var orphans: ArrayListUnmanaged(HypergraphZId) = .empty;
             var it = self.vertices.iterator();
             while (it.next()) |*kv| {
                 const hyperedges = kv.value_ptr.relations;
-                if (hyperedges.count() == 0) {
+                if (hyperedges.items.len == 0) {
                     try orphans.append(self.allocator, kv.key_ptr.*);
                 }
             }
@@ -1116,6 +1203,9 @@ fn generateTestData(graph: *HypergraphZ(Hyperedge, Vertex)) !Data {
     try graph.appendVerticesToHyperedge(h_b, &.{ v_e, v_e, v_a });
     const h_c = try graph.createHyperedgeAssumeCapacity(.{});
     try graph.appendVerticesToHyperedge(h_c, &.{ v_b, v_c, v_c, v_e, v_a, v_d, v_b });
+
+    // Build reverse index before returning.
+    try graph.build();
 
     return .{
         .v_a = v_a,
@@ -1300,6 +1390,7 @@ test "append vertices to hyperedge" {
     try graph.appendVerticesToHyperedge(hyperedge_id, ids[1..nb_vertices]);
     const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == nb_vertices);
+    try graph.build();
     for (ids, 0..) |id, i| {
         try expect(vertices[i] == id);
         const hyperedges = try graph.getVertexHyperedges(id);
@@ -1334,6 +1425,7 @@ test "prepend vertices to hyperedge" {
     try graph.prependVerticesToHyperedge(hyperedge_id, ids[0 .. nb_vertices - 1]);
     const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == nb_vertices);
+    try graph.build();
     for (ids, 0..) |id, i| {
         try expect(vertices[i] == id);
         const hyperedges = try graph.getVertexHyperedges(id);
@@ -1370,6 +1462,7 @@ test "insert vertices into hyperedge" {
     try graph.insertVerticesIntoHyperedge(hyperedge_id, ids[1..nb_vertices], 1);
     const vertices = try graph.getHyperedgeVertices(hyperedge_id);
     try expect(vertices.len == nb_vertices);
+    try graph.build();
     for (ids, 0..) |id, i| {
         try expect(vertices[i] == id);
         const hyperedges = try graph.getVertexHyperedges(id);
@@ -1387,6 +1480,8 @@ test "get vertex hyperedges" {
     const vertex_id = try graph.createVertex(.{});
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
 
+    try graph.build();
+
     try expectError(HypergraphZError.VertexNotFound, graph.getVertexHyperedges(max_id));
 
     const hyperedges = try graph.getVertexHyperedges(vertex_id);
@@ -1399,6 +1494,7 @@ test "count hyperedges" {
 
     const hyperedge_id = try graph.createHyperedge(.{});
     try expect(graph.countHyperedges() == 1);
+    try graph.build();
     try graph.deleteHyperedge(hyperedge_id, false);
     try expect(graph.countHyperedges() == 0);
 }
@@ -1409,6 +1505,7 @@ test "count vertices" {
 
     const vertex_id = try graph.createVertex(.{});
     try expect(graph.countVertices() == 1);
+    try graph.build();
     try graph.deleteVertex(vertex_id);
     try expect(graph.countVertices() == 0);
 }
@@ -1424,6 +1521,8 @@ test "delete vertex from hyperedge" {
     // Insert the vertex twice.
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
+
+    try graph.build();
 
     try expectError(HypergraphZError.HyperedgeNotFound, graph.deleteVertexFromHyperedge(max_id, vertex_id));
 
@@ -1457,6 +1556,7 @@ test "delete hyperedge only" {
 
     try graph.appendVerticesToHyperedge(hyperedge_id, ids);
 
+    try graph.build();
     try graph.deleteHyperedge(hyperedge_id, false);
     for (ids) |id| {
         const hyperedges = try graph.getVertexHyperedges(id);
@@ -1505,6 +1605,8 @@ test "delete vertex" {
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
     try graph.appendVertexToHyperedge(hyperedge_id, vertex_id);
 
+    try graph.build();
+
     try expectError(HypergraphZError.VertexNotFound, graph.deleteVertex(max_id));
 
     try graph.deleteVertex(vertex_id);
@@ -1536,6 +1638,8 @@ test "delete vertex by index from hyperedge" {
 
     // Append vertices to the hyperedge.
     try graph.appendVerticesToHyperedge(hyperedge_id, ids);
+
+    try graph.build();
 
     try expectError(HypergraphZError.HyperedgeNotFound, graph.deleteVertexByIndexFromHyperedge(max_id, 0));
 
@@ -1570,6 +1674,21 @@ test "get vertex indegree" {
     try expect(try graph.getVertexIndegree(data.v_c) == 3);
     try expect(try graph.getVertexIndegree(data.v_d) == 2);
     try expect(try graph.getVertexIndegree(data.v_e) == 3);
+
+    // Asymmetric graph: h = [v_a, v_b, v_c, v_b]
+    // Pairs: [v_a,v_b], [v_b,v_c], [v_c,v_b]
+    // Indegree: v_a=0, v_b=2, v_c=1
+    var asymmetric = try scaffold();
+    defer asymmetric.deinit();
+    const h = try asymmetric.createHyperedge(.{});
+    const v_a = try asymmetric.createVertex(.{});
+    const v_b = try asymmetric.createVertex(.{});
+    const v_c = try asymmetric.createVertex(.{});
+    try asymmetric.appendVerticesToHyperedge(h, &.{ v_a, v_b, v_c, v_b });
+    try asymmetric.build();
+    try expect(try asymmetric.getVertexIndegree(v_a) == 0);
+    try expect(try asymmetric.getVertexIndegree(v_b) == 2);
+    try expect(try asymmetric.getVertexIndegree(v_c) == 1);
 }
 
 test "get vertex outdegree" {
@@ -1585,6 +1704,25 @@ test "get vertex outdegree" {
     try expect(try graph.getVertexOutdegree(data.v_c) == 3);
     try expect(try graph.getVertexOutdegree(data.v_d) == 2);
     try expect(try graph.getVertexOutdegree(data.v_e) == 3);
+
+    // Asymmetric graph: h = [v_a, v_b, v_c, v_b]
+    // Pairs: [v_a,v_b], [v_b,v_c], [v_c,v_b]
+    // Outdegree: v_a=1, v_b=1, v_c=1 — add second hyperedge to break symmetry
+    // h2 = [v_a, v_b]: pair [v_a,v_b]
+    // Combined outdegree: v_a=2, v_b=1, v_c=1
+    var asymmetric = try scaffold();
+    defer asymmetric.deinit();
+    const h = try asymmetric.createHyperedge(.{});
+    const h2 = try asymmetric.createHyperedge(.{});
+    const v_a = try asymmetric.createVertex(.{});
+    const v_b = try asymmetric.createVertex(.{});
+    const v_c = try asymmetric.createVertex(.{});
+    try asymmetric.appendVerticesToHyperedge(h, &.{ v_a, v_b, v_c, v_b });
+    try asymmetric.appendVerticesToHyperedge(h2, &.{ v_a, v_b });
+    try asymmetric.build();
+    try expect(try asymmetric.getVertexOutdegree(v_a) == 2);
+    try expect(try asymmetric.getVertexOutdegree(v_b) == 1);
+    try expect(try asymmetric.getVertexOutdegree(v_c) == 1);
 }
 
 test "update hyperedge" {
@@ -2168,4 +2306,26 @@ test "reserve vertices" {
     try expect(graph.vertices.capacity() > 20);
     // Calling `createVertexAssumeCapacity` will panic but we can't test
     // it, see: https://github.com/ziglang/zig/issues/1356.
+}
+
+test "reserve hyperedge vertices" {
+    var graph = try HypergraphZ(
+        Hyperedge,
+        Vertex,
+    ).init(std.testing.allocator, .{});
+    defer graph.deinit();
+
+    try expectError(HypergraphZError.HyperedgeNotFound, graph.reserveHyperedgeVertices(max_id, 10));
+
+    const h = try graph.createHyperedge(.{});
+    const hyperedge = graph.hyperedges.getPtr(h).?;
+    try expect(hyperedge.relations.capacity == 0);
+    try graph.reserveHyperedgeVertices(h, 20);
+    try expect(hyperedge.relations.capacity >= 20);
+    // Vertices can now be appended without reallocation.
+    for (0..20) |_| {
+        const v = try graph.createVertex(.{});
+        try graph.appendVertexToHyperedge(h, v);
+    }
+    try expect(hyperedge.relations.items.len == 20);
 }

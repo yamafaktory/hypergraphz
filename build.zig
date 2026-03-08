@@ -75,5 +75,4 @@ pub fn build(b: *std.Build) void {
         bench_run.addArgs(args);
     }
     bench_step.dependOn(&bench_run.step);
-    b.default_step.dependOn(bench_step);
 }
