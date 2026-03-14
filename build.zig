@@ -56,6 +56,15 @@ pub fn build(b: *std.Build) void {
         .root_module = root_module,
     });
     check_step.dependOn(&check.step);
+    const bench_check = b.addExecutable(.{
+        .name = "bench",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(BenchPath),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    check_step.dependOn(&bench_check.step);
 
     // Bench step.
     const bench_source_file = b.path(BenchPath);

@@ -5,10 +5,9 @@ const hypergraphz = @import("hypergraphz.zig");
 
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
-const GeneralPurposeAllocator = std.heap.GeneralPurposeAllocator;
+const GeneralPurposeAllocator = std.heap.DebugAllocator;
 const HypergraphZ = hypergraphz.HypergraphZ;
 const HypergraphZId = hypergraphz.HypergraphZId;
-const Timer = std.time.Timer;
 const comptimePrint = std.fmt.comptimePrint;
 
 const Hyperedge = struct { weight: usize = 1 };
@@ -18,43 +17,46 @@ const Bench = struct {
     const Self = @This();
 
     graph: HypergraphZ(Hyperedge, Vertex),
-    timer: Timer,
+    io_single: std.Io.Threaded,
+    lap_start: std.Io.Timestamp,
 
     pub fn init(allocator: Allocator, comptime name: []const u8, config: HypergraphZ(Hyperedge, Vertex).HypergraphZConfig) !Self {
-        var io_single = std.Io.Threaded.init_single_threaded;
-        defer io_single.deinit();
+        var io_single: std.Io.Threaded = .init_single_threaded;
         const io = io_single.io();
+
         var buf: [256]u8 = undefined;
         var w = std.Io.File.stdout().writer(io, &buf);
         try w.interface.print(comptimePrint("{s}...\n", .{name}), .{});
         try w.interface.flush();
 
         const graph = try HypergraphZ(Hyperedge, Vertex).init(allocator, config);
-        var timer = try Timer.start();
-        // Set lap baseline after init so the first lap() or read() measures from here.
-        _ = timer.lap();
+        const lap_start = std.Io.Timestamp.now(io, .awake);
 
-        return .{ .timer = timer, .graph = graph };
+        return .{
+            .graph = graph,
+            .io_single = io_single,
+            .lap_start = lap_start,
+        };
     }
 
     /// Reset the timer. Use this to exclude setup from the measured duration.
     pub fn resetTimer(self: *Self) void {
-        _ = self.timer.lap();
+        self.lap_start = std.Io.Timestamp.now(self.io_single.io(), .awake);
     }
 
     pub fn end(self: *Self) !void {
-        const elapsed = self.timer.lap();
-        var io_single = std.Io.Threaded.init_single_threaded;
-        defer io_single.deinit();
-        const io = io_single.io();
+        const io = self.io_single.io();
+        const elapsed = self.lap_start.durationTo(std.Io.Timestamp.now(io, .awake));
         var buf: [256]u8 = undefined;
         var w = std.Io.File.stdout().writer(io, &buf);
-        try w.interface.print("Total duration: {D}\n\n", .{elapsed});
+
+        try w.interface.print("Total duration: {f}\n\n", .{elapsed});
         try w.interface.flush();
     }
 
     pub fn deinit(self: *Self) void {
         self.graph.deinit();
+        self.io_single.deinit();
     }
 };
 

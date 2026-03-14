@@ -158,6 +158,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Internal method to get an id.
         fn _getId(self: *Self) HypergraphZId {
             self.id_counter += 1;
+
             return self.id_counter;
         }
 
@@ -249,6 +250,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         fn _hyperedgePtr(self: *Self, id: HypergraphZId) HypergraphZError!*HyperedgeDataRelations {
             return self.hyperedges.getPtr(id) orelse {
                 debug("hyperedge {} not found", .{id});
+
                 return HypergraphZError.HyperedgeNotFound;
             };
         }
@@ -256,6 +258,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         fn _vertexPtr(self: *Self, id: HypergraphZId) HypergraphZError!*VertexDataRelations {
             return self.vertices.getPtr(id) orelse {
                 debug("vertex {} not found", .{id});
+
                 return HypergraphZError.VertexNotFound;
             };
         }
@@ -271,9 +274,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             for (vertex.relations.items, 0..) |h, i| {
                 if (h == hyperedge_id) {
                     _ = vertex.relations.orderedRemove(i);
+
                     return true;
                 }
             }
+
             return false;
         }
 
@@ -305,28 +310,25 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// ```
         pub fn build(self: *Self) HypergraphZError!void {
             // Clear any existing reverse index entries.
-            {
-                var it = self.vertices.iterator();
-                while (it.next()) |*kv| {
-                    kv.value_ptr.relations.clearRetainingCapacity();
-                }
+            var v_it = self.vertices.iterator();
+            while (v_it.next()) |*kv| {
+                kv.value_ptr.relations.clearRetainingCapacity();
             }
 
             // Rebuild from the forward index.
             // _addVertexRelation handles deduplication: a vertex appearing multiple
             // times in a hyperedge is recorded only once in the reverse index.
-            {
-                var it = self.hyperedges.iterator();
-                while (it.next()) |*kv| {
-                    const hyperedge_id = kv.key_ptr.*;
-                    for (kv.value_ptr.relations.items) |vertex_id| {
-                        const vertex = self.vertices.getPtr(vertex_id).?;
-                        try self._addVertexRelation(vertex, hyperedge_id);
-                    }
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |*kv| {
+                const hyperedge_id = kv.key_ptr.*;
+                for (kv.value_ptr.relations.items) |vertex_id| {
+                    const vertex = self.vertices.getPtr(vertex_id).?;
+                    try self._addVertexRelation(vertex, hyperedge_id);
                 }
             }
 
             self.is_built = true;
+
             debug("reverse index built: {} vertices, {} hyperedges", .{
                 self.vertices.count(),
                 self.hyperedges.count(),
@@ -665,6 +667,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn appendVerticesToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_ids: []const HypergraphZId) HypergraphZError!void {
             if (vertex_ids.len == 0) {
                 debug("no vertices to append to hyperedge {}, skipping", .{hyperedge_id});
+
                 return;
             }
 
@@ -693,6 +696,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn prependVerticesToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertices_ids: []const HypergraphZId) HypergraphZError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to prepend to hyperedge {}, skipping", .{hyperedge_id});
+
                 return;
             }
 
@@ -721,6 +725,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertices_ids: []const HypergraphZId, index: usize) HypergraphZError!void {
             if (vertices_ids.len == 0) {
                 debug("no vertices to insert into hyperedge {}, skipping", .{hyperedge_id});
+
                 return HypergraphZError.NoVerticesToInsert;
             }
 
@@ -800,6 +805,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn getIntersections(self: *Self, hyperedges_ids: []const HypergraphZId) HypergraphZError![]const HypergraphZId {
             if (hyperedges_ids.len < 2) {
                 debug("at least two hyperedges must be provided, skipping", .{});
+
                 return HypergraphZError.NotEnoughHyperedgesProvided;
             }
 
@@ -850,6 +856,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         fn compareNode(map: *const CameFrom, n1: HypergraphZId, n2: HypergraphZId) std.math.Order {
             const w1: usize = if (map.get(n1)) |n| if (n) |e| e.weight else 0 else 0;
             const w2: usize = if (map.get(n2)) |n| if (n) |e| e.weight else 0 else 0;
+
             return std.math.order(w1, w2);
         }
         /// Struct containing the shortest path as a list of vertices.
@@ -875,14 +882,14 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
             var came_from: CameFrom = .empty;
             var cost_so_far: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
-            var frontier: Queue = .init(arena.allocator(), &came_from);
+            var frontier: Queue = .initContext(&came_from);
 
             try came_from.put(arena_allocator, from, null);
             try cost_so_far.put(arena_allocator, from, 0);
-            try frontier.add(from);
+            try frontier.push(arena_allocator, from);
 
             while (frontier.count() != 0) {
-                const current = frontier.remove();
+                const current = frontier.pop().?;
 
                 if (current == to) break;
 
@@ -904,7 +911,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                                 .weight = new_cost,
                                 .from = current,
                             });
-                            try frontier.add(next);
+                            try frontier.push(arena_allocator, next);
                         }
                     }
                 }
@@ -913,6 +920,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Check if path was found.
             if (!came_from.contains(to)) {
                 debug("no path found between {} and {}", .{ from, to });
+
                 return .{ .data = null };
             }
 
@@ -929,6 +937,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             std.mem.reverse(HypergraphZId, path.items);
 
             debug("path found between {} and {}", .{ from, to });
+
             return .{ .data = path };
         }
 
@@ -946,6 +955,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         pub fn joinHyperedges(self: *Self, hyperedges_ids: []const HypergraphZId) HypergraphZError!void {
             if (hyperedges_ids.len < 2) {
                 debug("at least two hyperedges must be provided, skipping", .{});
+
                 return HypergraphZError.NotEnoughHyperedgesProvided;
             }
 
@@ -1120,6 +1130,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             debug("{} initial and {} terminal endpoints found", .{ result.initial.len, result.terminal.len });
+
             return result;
         }
 
@@ -1136,6 +1147,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             debug("{} orphan hyperedges found", .{orphans.items.len});
+
             return orphans.toOwnedSlice(self.allocator);
         }
 
@@ -1153,6 +1165,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             debug("{} orphan vertices found", .{orphans.items.len});
+
             return orphans.toOwnedSlice(self.allocator);
         }
     };
