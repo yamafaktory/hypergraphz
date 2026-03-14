@@ -50,6 +50,13 @@ pub fn build(b: *std.Build) void {
         .install_subdir = "docs",
     }).step);
 
+    // Format step.
+    const fmt_step = b.step("fmt", "Format all source files");
+    const fmt = b.addFmt(.{
+        .paths = &.{ HypergraphZPath, BenchPath, "build.zig" },
+    });
+    fmt_step.dependOn(&fmt.step);
+
     // Check step used by the zls configuration.
     const check_step = b.step("check", "Check if HypergraphZ compiles");
     const check = b.addTest(.{
