@@ -239,7 +239,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             return self.vertices.count();
         }
 
-        /// Check if an hyperedge exists.
+        /// Check if a hyperedge exists.
         pub fn checkIfHyperedgeExists(self: *Self, id: HypergraphZId) HypergraphZError!void {
             _ = try self._hyperedgePtr(id);
         }
@@ -427,8 +427,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             return outdegree;
         }
 
-        /// Struct containing the adjacents vertices as a hashmap whose keys are
-        /// hyperedge ids and values are an array of adjacent vertices.
+        /// Struct containing adjacent vertices grouped by hyperedge.
+        /// Keys are hyperedge ids; values are the list of adjacent vertices in that hyperedge.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const AdjacencyResult = struct {
             data: AutoArrayHashMapUnmanaged(HypergraphZId, ArrayListUnmanaged(HypergraphZId)),
@@ -445,8 +445,10 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
         };
 
-        /// Get the adjacents vertices connected to a vertex.
-        /// The caller is responsible for freeing the result memory with `denit`.
+        /// Return the in-neighbors of `id`: vertices with a direct edge pointing into `id`,
+        /// grouped by hyperedge. Keys are hyperedge ids; values are the source vertices of
+        /// pairs ending at `id` in that hyperedge.
+        /// The caller is responsible for freeing the result memory with `deinit`.
         pub fn getVertexAdjacencyTo(self: *Self, id: HypergraphZId) HypergraphZError!AdjacencyResult {
             if (!self.is_built) return HypergraphZError.NotBuilt;
 
@@ -478,8 +480,10 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             return .{ .data = adjacents };
         }
 
-        /// Get the adjacents vertices connected from a vertex.
-        /// The caller is responsible for freeing the result memory with `denit`.
+        /// Return the out-neighbors of `id`: vertices directly reachable from `id`,
+        /// grouped by hyperedge. Keys are hyperedge ids; values are the target vertices of
+        /// pairs starting at `id` in that hyperedge.
+        /// The caller is responsible for freeing the result memory with `deinit`.
         pub fn getVertexAdjacencyFrom(self: *Self, id: HypergraphZId) HypergraphZError!AdjacencyResult {
             if (!self.is_built) return HypergraphZError.NotBuilt;
 
@@ -780,7 +784,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             const vertex = try self._vertexPtr(vertex_id);
             const removed = _removeVertexRelation(vertex, hyperedge_id);
             assert(removed);
-            debug("vertice {} deleted from hyperedge {}", .{ vertex_id, hyperedge_id });
+            debug("vertex {} deleted from hyperedge {}", .{ vertex_id, hyperedge_id });
         }
 
         /// Delete a vertex from a hyperedge at a given index.
@@ -806,7 +810,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 assert(removed);
             }
 
-            debug("vertice {} at index {} deleted from hyperedge {}", .{ vertex_id, index, hyperedge_id });
+            debug("vertex {} at index {} deleted from hyperedge {}", .{ vertex_id, index, hyperedge_id });
         }
 
         /// Get the intersections between multiple hyperedges.
