@@ -13,6 +13,7 @@ jobs:
       - uses: mlugg/setup-zig@v2.2.1
         with:
           version: "0.16.0-dev.2905+5d71e3051"
+          use-cache: false
       - run: zig build docs
       - uses: actions/upload-pages-artifact@v4.0.0
         with:
