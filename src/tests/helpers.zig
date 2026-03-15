@@ -16,6 +16,10 @@ pub const Vertex = struct { purr: bool = false };
 pub const Graph = HypergraphZ(Hyperedge, Vertex);
 
 pub fn scaffold() HypergraphZError!Graph {
+    // Enable debug-level logging for all tests using this scaffold.
+    // Remove this line or change .debug to .warn to silence debug output.
+    // Note: build.zig sets has_side_effects = true on the test runner,
+    // which is required for log output to print even when tests are cached.
     std.testing.log_level = .debug;
     return try HypergraphZ(Hyperedge, Vertex).init(std.testing.allocator, .{ .vertices_capacity = 5, .hyperedges_capacity = 3 });
 }

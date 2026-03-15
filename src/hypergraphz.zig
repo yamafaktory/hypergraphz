@@ -16,6 +16,28 @@
 //!   unless a large batch of insertions makes a full rebuild desirable.
 //!
 //! Call `build()` once after the initial bulk load, then query freely.
+//!
+//! ## Debug logging
+//!
+//! HypergraphZ emits structured debug messages via `std.log` under the `.hypergraphz` scope.
+//! Each message is automatically prefixed with the name of the function that produced it,
+//! e.g. `[hypergraphz] (debug): [appendVertexToHyperedge] vertex 1 appended to hyperedge 3`.
+//!
+//! To enable debug output in tests, set the log level before running:
+//!
+//! ```zig
+//! std.testing.log_level = .debug;
+//! ```
+//!
+//! To filter only HypergraphZ messages in a host application, configure the scope level:
+//!
+//! ```zig
+//! pub const std_options: std.Options = .{
+//!     .log_scope_levels = &.{
+//!         .{ .scope = .hypergraphz, .level = .debug },
+//!     },
+//! };
+//! ```
 
 const std = @import("std");
 
@@ -28,8 +50,15 @@ const MemoryPool = std.heap.MemoryPool;
 const MultiArrayList = std.MultiArrayList;
 const PriorityQueue = std.PriorityQueue;
 const assert = std.debug.assert;
-const debug = std.log.debug;
+const log = std.log.scoped(.hypergraphz);
 const window = std.mem.window;
+
+/// Emit a debug log line prefixed with the calling function's name.
+/// Usage: debugAt(@src(), "message {}", .{arg});
+/// Output: [hypergraphz] (debug): [functionName] message arg
+inline fn debugAt(comptime src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
+    log.debug("[" ++ src.fn_name ++ "] " ++ fmt, args);
+}
 
 pub const HypergraphZId = u32;
 
@@ -202,7 +231,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 copy.id_counter = @max(copy.id_counter, kv.key_ptr.*);
             }
 
-            debug("clone: {} vertices, {} hyperedges", .{ copy.vertices.count(), copy.hyperedges.count() });
+            debugAt(@src(), "{} vertices, {} hyperedges", .{ copy.vertices.count(), copy.hyperedges.count() });
             return copy;
         }
 
@@ -268,7 +297,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
             self.is_built = true;
 
-            debug("reverse index built: {} vertices, {} hyperedges", .{
+            debugAt(@src(), "reverse index built: {} vertices, {} hyperedges", .{
                 self.vertices.count(),
                 self.hyperedges.count(),
             });
@@ -283,7 +312,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         fn _hyperedgePtr(self: *Self, id: HypergraphZId) HypergraphZError!*HyperedgeDataRelations {
             return self.hyperedges.getPtr(id) orelse {
-                debug("hyperedge {} not found", .{id});
+                debugAt(@src(), "hyperedge {} not found", .{id});
 
                 return HypergraphZError.HyperedgeNotFound;
             };
@@ -291,7 +320,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         fn _vertexPtr(self: *Self, id: HypergraphZId) HypergraphZError!*VertexDataRelations {
             return self.vertices.getPtr(id) orelse {
-                debug("vertex {} not found", .{id});
+                debugAt(@src(), "vertex {} not found", .{id});
 
                 return HypergraphZError.VertexNotFound;
             };
@@ -458,7 +487,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Add hyperedge to vertex relations (skipped in build phase).
             if (self.is_built) try self._addVertexRelation(vertex, hyperedge_id);
 
-            debug("vertex {} appended to hyperedge {}", .{
+            debugAt(@src(), "vertex {} appended to hyperedge {}", .{
                 vertex_id,
                 hyperedge_id,
             });
@@ -477,7 +506,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Add hyperedge to vertex relations (skipped in build phase).
             if (self.is_built) try self._addVertexRelation(vertex, hyperedge_id);
 
-            debug("vertex {} prepended to hyperedge {}", .{
+            debugAt(@src(), "vertex {} prepended to hyperedge {}", .{
                 vertex_id,
                 hyperedge_id,
             });
@@ -500,7 +529,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Add hyperedge to vertex relations (skipped in build phase).
             if (self.is_built) try self._addVertexRelation(vertex, hyperedge_id);
 
-            debug("vertex {} inserted into hyperedge {} at index {}", .{
+            debugAt(@src(), "vertex {} inserted into hyperedge {} at index {}", .{
                 vertex_id,
                 hyperedge_id,
                 index,
@@ -512,7 +541,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn appendVerticesToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertex_ids: []const HypergraphZId) HypergraphZError!void {
             if (vertex_ids.len == 0) {
-                debug("no vertices to append to hyperedge {}, skipping", .{hyperedge_id});
+                debugAt(@src(), "no vertices to append to hyperedge {}, skipping", .{hyperedge_id});
 
                 return;
             }
@@ -533,7 +562,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("vertices appended to hyperedge {}", .{hyperedge_id});
+            debugAt(@src(), "vertices appended to hyperedge {}", .{hyperedge_id});
         }
 
         /// Prepend vertices to a hyperedge.
@@ -541,7 +570,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn prependVerticesToHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertices_ids: []const HypergraphZId) HypergraphZError!void {
             if (vertices_ids.len == 0) {
-                debug("no vertices to prepend to hyperedge {}, skipping", .{hyperedge_id});
+                debugAt(@src(), "no vertices to prepend to hyperedge {}, skipping", .{hyperedge_id});
 
                 return;
             }
@@ -562,7 +591,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("vertices prepended to hyperedge {}", .{hyperedge_id});
+            debugAt(@src(), "vertices prepended to hyperedge {}", .{hyperedge_id});
         }
 
         /// Insert vertices into a hyperedge at a given index.
@@ -570,7 +599,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// is updated for performance; the reverse index is populated lazily by `build()`.
         pub fn insertVerticesIntoHyperedge(self: *Self, hyperedge_id: HypergraphZId, vertices_ids: []const HypergraphZId, index: usize) HypergraphZError!void {
             if (vertices_ids.len == 0) {
-                debug("no vertices to insert into hyperedge {}, skipping", .{hyperedge_id});
+                debugAt(@src(), "no vertices to insert into hyperedge {}, skipping", .{hyperedge_id});
 
                 return HypergraphZError.NoVerticesToInsert;
             }
@@ -595,7 +624,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("vertices inserted into hyperedge {} at index {}", .{ hyperedge_id, index });
+            debugAt(@src(), "vertices inserted into hyperedge {} at index {}", .{ hyperedge_id, index });
         }
 
         /// Delete a vertex from a hyperedge.
@@ -619,7 +648,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             const vertex = try self._vertexPtr(vertex_id);
             const removed = _removeVertexRelation(vertex, hyperedge_id);
             assert(removed);
-            debug("vertex {} deleted from hyperedge {}", .{ vertex_id, hyperedge_id });
+            debugAt(@src(), "vertex {} deleted from hyperedge {}", .{ vertex_id, hyperedge_id });
         }
 
         /// Delete a vertex from a hyperedge at a given index.
@@ -645,7 +674,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 assert(removed);
             }
 
-            debug("vertex {} at index {} deleted from hyperedge {}", .{ vertex_id, index, hyperedge_id });
+            debugAt(@src(), "vertex {} at index {} deleted from hyperedge {}", .{ vertex_id, index, hyperedge_id });
         }
 
         /// Delete a hyperedge.
@@ -689,7 +718,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             const removed = self.hyperedges.orderedRemove(id);
             assert(removed);
 
-            debug("hyperedge {} deleted", .{id});
+            debugAt(@src(), "hyperedge {} deleted", .{id});
         }
 
         /// Delete a vertex.
@@ -724,7 +753,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             const removed = self.vertices.orderedRemove(id);
             assert(removed);
 
-            debug("vertex {} deleted", .{id});
+            debugAt(@src(), "vertex {} deleted", .{id});
         }
 
         /// Reverse a hyperedge.
@@ -733,14 +762,14 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             const tmp = try hyperedge.relations.toOwnedSlice(self.allocator);
             std.mem.reverse(HypergraphZId, tmp);
             hyperedge.relations = ArrayListUnmanaged(HypergraphZId).fromOwnedSlice(tmp);
-            debug("hyperedge {} reversed", .{hyperedge_id});
+            debugAt(@src(), "hyperedge {} reversed", .{hyperedge_id});
         }
 
         /// Merge two or more hyperedges into one.
         /// All the vertices are moved to the first hyperedge.
         pub fn mergeHyperedges(self: *Self, hyperedges_ids: []const HypergraphZId) HypergraphZError!void {
             if (hyperedges_ids.len < 2) {
-                debug("at least two hyperedges must be provided, skipping", .{});
+                debugAt(@src(), "at least two hyperedges must be provided, skipping", .{});
 
                 return HypergraphZError.NotEnoughHyperedgesProvided;
             }
@@ -775,7 +804,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 assert(removed);
             }
 
-            debug("hyperedges {any} merged into hyperedge {}", .{ hyperedges_ids, hyperedges_ids[0] });
+            debugAt(@src(), "hyperedges {any} merged into hyperedge {}", .{ hyperedges_ids, hyperedges_ids[0] });
         }
 
         /// Split a hyperedge into two at a given index.
@@ -826,7 +855,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Truncate the original hyperedge to [0..at].
             self.hyperedges.getPtr(id).?.relations.shrinkRetainingCapacity(at);
 
-            debug("hyperedge {} split at {} into hyperedge {}", .{ id, at, new_id });
+            debugAt(@src(), "hyperedge {} split at {} into hyperedge {}", .{ id, at, new_id });
             return new_id;
         }
 
@@ -883,7 +912,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             hyperedge.relations.deinit(self.allocator);
             const removed = self.hyperedges.orderedRemove(id);
             assert(removed);
-            debug("hyperedge {} contracted", .{id});
+            debugAt(@src(), "hyperedge {} contracted", .{id});
         }
 
         /// Merge two or more vertices into one.
@@ -937,7 +966,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 assert(removed);
             }
 
-            debug("vertices {any} merged into vertex {}", .{ vertex_ids, primary });
+            debugAt(@src(), "vertices {any} merged into vertex {}", .{ vertex_ids, primary });
         }
 
         /// Split a vertex into two by redistributing a subset of its hyperedge memberships
@@ -978,7 +1007,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("vertex {} split into vertex {}", .{ id, new_id });
+            debugAt(@src(), "vertex {} split into vertex {}", .{ id, new_id });
             return new_id;
         }
 
@@ -1096,7 +1125,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                                 result.value_ptr.* = .empty;
                             }
                             try result.value_ptr.*.append(self.allocator, adjacent);
-                            debug("adjacent vertex {} to vertex {} found in hyperedge {}", .{ adjacent, id, hyperedge_id });
+                            debugAt(@src(), "adjacent vertex {} to vertex {} found in hyperedge {}", .{ adjacent, id, hyperedge_id });
                         }
                     }
                 }
@@ -1131,7 +1160,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                                 result.value_ptr.* = .empty;
                             }
                             try result.value_ptr.*.append(self.allocator, adjacent);
-                            debug("adjacent vertex {} from vertex {} found in hyperedge {}", .{ adjacent, id, hyperedge_id });
+                            debugAt(@src(), "adjacent vertex {} from vertex {} found in hyperedge {}", .{ adjacent, id, hyperedge_id });
                         }
                     }
                 }
@@ -1144,7 +1173,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// This method returns an owned slice which must be freed by the caller.
         pub fn getIntersections(self: *Self, hyperedges_ids: []const HypergraphZId) HypergraphZError![]const HypergraphZId {
             if (hyperedges_ids.len < 2) {
-                debug("at least two hyperedges must be provided, skipping", .{});
+                debugAt(@src(), "at least two hyperedges must be provided, skipping", .{});
 
                 return HypergraphZError.NotEnoughHyperedgesProvided;
             }
@@ -1174,7 +1203,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                     if (result.found_existing) {
                         result.value_ptr.* += 1;
                         if (result.value_ptr.* == hyperedges_ids.len) {
-                            debug("intersection found at vertex {}", .{v});
+                            debugAt(@src(), "intersection found at vertex {}", .{v});
                             try intersections.append(self.allocator, v);
                         }
                     } else {
@@ -1270,7 +1299,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 try result.terminal.append(self.allocator, .{ .hyperedge_id = hyperedge_id, .vertex_id = vertices[vertices.len - 1] });
             }
 
-            debug("{} initial and {} terminal endpoints found", .{ result.initial.len, result.terminal.len });
+            debugAt(@src(), "{} initial and {} terminal endpoints found", .{ result.initial.len, result.terminal.len });
 
             return result;
         }
@@ -1287,7 +1316,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("{} orphan hyperedges found", .{orphans.items.len});
+            debugAt(@src(), "{} orphan hyperedges found", .{orphans.items.len});
 
             return orphans.toOwnedSlice(self.allocator);
         }
@@ -1305,7 +1334,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("{} orphan vertices found", .{orphans.items.len});
+            debugAt(@src(), "{} orphan vertices found", .{orphans.items.len});
 
             return orphans.toOwnedSlice(self.allocator);
         }
@@ -1388,7 +1417,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
             // Check if path was found.
             if (!came_from.contains(to)) {
-                debug("no path found between {} and {}", .{ from, to });
+                debugAt(@src(), "no path found between {} and {}", .{ from, to });
 
                 return .{ .data = null };
             }
@@ -1405,7 +1434,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
             std.mem.reverse(HypergraphZId, path.items);
 
-            debug("path found between {} and {}", .{ from, to });
+            debugAt(@src(), "path found between {} and {}", .{ from, to });
 
             return .{ .data = path };
         }
@@ -1449,7 +1478,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("BFS from {}: {} vertices visited", .{ start, result.items.len });
+            debugAt(@src(), "from {}: {} vertices visited", .{ start, result.items.len });
 
             return result.toOwnedSlice(self.allocator);
         }
@@ -1498,7 +1527,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("DFS from {}: {} vertices visited", .{ start, result.items.len });
+            debugAt(@src(), "from {}: {} vertices visited", .{ start, result.items.len });
 
             return result.toOwnedSlice(self.allocator);
         }
@@ -1577,7 +1606,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("findAllPaths from {} to {}: {} paths found", .{ from, to, result.data.items.len });
+            debugAt(@src(), "from {} to {}: {} paths found", .{ from, to, result.data.items.len });
 
             return result;
         }
@@ -1612,7 +1641,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                         if (pair[0] != current) continue;
                         const next = pair[1];
                         if (next == to) {
-                            debug("isReachable: {} -> {} true", .{ from, to });
+                            debugAt(@src(), "{} -> {} true", .{ from, to });
                             return true;
                         }
                         if (visited.contains(next)) continue;
@@ -1622,7 +1651,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("isReachable: {} -> {} false", .{ from, to });
+            debugAt(@src(), "{} -> {} false", .{ from, to });
             return false;
         }
 
@@ -1718,7 +1747,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("getTransitiveClosure: {} vertices, {} hyperedges", .{
+            debugAt(@src(), "{} vertices, {} hyperedges", .{
                 closure.vertices.count(),
                 closure.hyperedges.count(),
             });
@@ -1905,7 +1934,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 while (b_it.next()) |kv| kv.value_ptr.betweenness /= norm;
             }
 
-            debug("computeCentrality: {} vertices processed", .{n});
+            debugAt(@src(), "{} vertices processed", .{n});
             return result;
         }
 
@@ -1940,7 +1969,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
                     if (state.get(entry.vertex)) |s| switch (s) {
                         .in_stack => {
-                            debug("hasCycle: cycle detected at vertex {}", .{entry.vertex});
+                            debugAt(@src(), "cycle detected at vertex {}", .{entry.vertex});
                             return true;
                         },
                         .done => continue,
@@ -1961,7 +1990,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("hasCycle: no cycle found", .{});
+            debugAt(@src(), "no cycle found", .{});
             return false;
         }
 
@@ -2036,7 +2065,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 return HypergraphZError.CycleDetected;
             }
 
-            debug("topologicalSort: ordered {} vertices", .{result.items.len});
+            debugAt(@src(), "ordered {} vertices", .{result.items.len});
             return try result.toOwnedSlice(self.allocator);
         }
 
@@ -2080,7 +2109,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             const connected = visited.count() == count;
-            debug("isConnected: {}", .{connected});
+            debugAt(@src(), "{}", .{connected});
             return connected;
         }
 
@@ -2146,7 +2175,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 try result.data.append(self.allocator, owned);
             }
 
-            debug("getConnectedComponents: {} components found", .{result.data.items.len});
+            debugAt(@src(), "{} components found", .{result.data.items.len});
             return result;
         }
 
@@ -2199,7 +2228,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("getDual: {} vertices, {} hyperedges", .{
+            debugAt(@src(), "{} vertices, {} hyperedges", .{
                 dual.vertices.count(),
                 dual.hyperedges.count(),
             });
@@ -2246,7 +2275,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 skeleton.id_counter = @max(skeleton.id_counter, kv.key_ptr.*);
             }
 
-            debug("getKSkeleton({}): {} vertices, {} hyperedges", .{
+            debugAt(@src(), "k={}: {} vertices, {} hyperedges", .{
                 k,
                 skeleton.vertices.count(),
                 skeleton.hyperedges.count(),
@@ -2304,7 +2333,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 sub.id_counter = @max(sub.id_counter, kv.key_ptr.*);
             }
 
-            debug("getVertexInducedSubhypergraph: {} vertices, {} hyperedges", .{
+            debugAt(@src(), "{} vertices, {} hyperedges", .{
                 sub.vertices.count(),
                 sub.hyperedges.count(),
             });
@@ -2363,7 +2392,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 sub.id_counter = @max(sub.id_counter, hid);
             }
 
-            debug("getEdgeInducedSubhypergraph: {} vertices, {} hyperedges", .{
+            debugAt(@src(), "{} vertices, {} hyperedges", .{
                 sub.vertices.count(),
                 sub.hyperedges.count(),
             });
@@ -2420,7 +2449,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 }
             }
 
-            debug("expandToGraph: {} vertices, {} hyperedges", .{
+            debugAt(@src(), "{} vertices, {} hyperedges", .{
                 graph.vertices.count(),
                 graph.hyperedges.count(),
             });
