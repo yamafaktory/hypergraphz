@@ -7,6 +7,11 @@ HypergraphZ is a directed hypergraph implementation in Zig (https://en.wikipedia
 - Each hyperedge can contain zero, one (unary) or multiple vertices.
 - Each hyperedge can contain vertices directed to themselves one or more times.
 
+## Zig version
+
+HypergraphZ currently requires **Zig 0.16.0-dev.2905+5d71e3051**. This will be updated to
+the stable 0.16.0 release once it is available.
+
 ## Usage
 
 Add `hypergraphz` as a dependency to your `build.zig.zon`:
