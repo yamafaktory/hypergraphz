@@ -69,7 +69,7 @@ test "codec: round-trip type with pointer field using custom codec" {
     // a custom serialize/deserialize pair is required.
     const SliceVertex = struct { name: []const u8 };
     const FlatEdge = struct { weight: u32 };
-    const NPGraph = HypergraphZ(FlatEdge, SliceVertex);
+    const NPGraph = HypergraphZ(FlatEdge, SliceVertex, .{});
 
     const serNPH = struct {
         fn f(val: FlatEdge, writer: *std.Io.Writer) !void {

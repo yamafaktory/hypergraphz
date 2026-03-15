@@ -192,7 +192,7 @@ test "is reachable" {
     try expect(try graph.isReachable(data.v_a, data.v_a));
     try expect(try graph.isReachable(data.v_e, data.v_e));
 
-    // Reachable pairs (via directed edges).
+    // Reachable pairs (via directed hyperedges).
     try expect(try graph.isReachable(data.v_a, data.v_e));
     try expect(try graph.isReachable(data.v_e, data.v_a)); // e -> a via h_b
     try expect(try graph.isReachable(data.v_b, data.v_d));
@@ -237,7 +237,7 @@ test "get transitive closure" {
         try graph.build();
         var closure = try graph.getTransitiveClosure(defaultPairToHyperedge);
         defer closure.deinit();
-        // a→b, a→c, b→c: 3 edges, no self-loops.
+        // a→b, a→c, b→c: 3 hyperedges, no self-loops.
         try expect(closure.countVertices() == 3);
         try expect(closure.countHyperedges() == 3);
         try closure.build();
@@ -245,7 +245,7 @@ test "get transitive closure" {
     }
 
     // Main test graph: all 5 vertices are mutually reachable and on cycles.
-    // Strict closure has 5*5 = 25 edges (every pair including self-loops).
+    // Strict closure has 5*5 = 25 hyperedges (every pair including self-loops).
     {
         var graph = try h.scaffold();
         defer graph.deinit();

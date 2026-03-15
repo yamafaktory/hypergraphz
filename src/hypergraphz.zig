@@ -82,10 +82,18 @@ pub const HypergraphZError = (error{
     VertexNotFound,
 } || Allocator.Error);
 
+/// Options for `HypergraphZ`.
+pub const HypergraphZOptions = struct {
+    /// Name of the integer field on the hyperedge type used as the hyperedge weight
+    /// in `findShortestPath`. Defaults to `"weight"`.
+    weight_field: []const u8 = "weight",
+};
+
 /// Create a hypergraph with hyperedges and vertices as comptime types.
 /// Both vertex and hyperedge must be struct types.
-/// Every hyperedge must have a `weight` field of type `.Int`.
-pub fn HypergraphZ(comptime H: type, comptime V: type) type {
+/// The hyperedge type must have an integer field whose name matches
+/// `options.weight_field` (default `"weight"`).
+pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: HypergraphZOptions) type {
     return struct {
         const Self = @This();
 
@@ -111,7 +119,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             assert(@typeInfo(H) == .@"struct");
             var weightFieldType: ?type = null;
             for (@typeInfo(H).@"struct".fields) |f| {
-                if (std.mem.eql(u8, f.name, "weight")) {
+                if (std.mem.eql(u8, f.name, options.weight_field)) {
                     weightFieldType = f.type;
                 }
             }
@@ -266,9 +274,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         /// Typical usage for large graphs:
         /// ```zig
         /// // Fast build phase — no reverse-index overhead.
-        /// for (raw_edges) |edge| {
-        ///     const h = try graph.createHyperedge(edge.data);
-        ///     try graph.appendVerticesToHyperedge(h, edge.vertices);
+        /// for (raw_hyperedges) |hyperedge| {
+        ///     const h = try graph.createHyperedge(hyperedge.data);
+        ///     try graph.appendVerticesToHyperedge(h, hyperedge.vertices);
         /// }
         /// // Build reverse index once, then query freely.
         /// try graph.build();
@@ -1105,7 +1113,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
         };
 
-        /// Return the in-neighbors of `id`: vertices with a direct edge pointing into `id`,
+        /// Return the in-neighbors of `id`: vertices with a directed connection pointing into `id`,
         /// grouped by hyperedge. Keys are hyperedge ids; values are the source vertices of
         /// pairs ending at `id` in that hyperedge.
         /// The caller is responsible for freeing the result memory with `deinit`.
@@ -1402,7 +1410,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 const vertex = self.vertices.get(current).?;
                 for (vertex.relations.items) |hyperedge_id| {
                     const hyperedge = self.hyperedges.get(hyperedge_id).?;
-                    const weight = hyperedge.data.weight;
+                    const weight = @field(hyperedge.data.*, options.weight_field);
                     var wIt = window(HypergraphZId, hyperedge.relations.items, 2, 1);
                     while (wIt.next()) |pair| {
                         if (pair[0] != current) continue;
@@ -2076,7 +2084,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
         }
 
         /// Return true if the hypergraph is weakly connected: every vertex is
-        /// reachable from every other vertex when edge direction is ignored.
+        /// reachable from every other vertex when hyperedge direction is ignored.
         /// An empty graph (no vertices) is considered connected.
         pub fn isConnected(self: *Self) HypergraphZError!bool {
             if (!self.is_built) return HypergraphZError.NotBuilt;
@@ -2133,7 +2141,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
         /// Partition all vertices into weakly-connected components.
         /// Each component is a slice of vertex IDs reachable from each other
-        /// when edge direction is ignored.
+        /// when hyperedge direction is ignored.
         /// The caller is responsible for freeing the result memory with `deinit`.
         pub fn getConnectedComponents(self: *Self) HypergraphZError!ConnectedComponentsResult {
             if (!self.is_built) return HypergraphZError.NotBuilt;
@@ -2347,7 +2355,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             return sub;
         }
 
-        /// Return the edge-induced subhypergraph: a new hypergraph containing
+        /// Return the hyperedge-induced subhypergraph: a new hypergraph containing
         /// exactly the specified hyperedges and only the vertices that appear
         /// in at least one of them.
         /// The caller must call `build()` on the result and is responsible for
@@ -2576,11 +2584,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
             const id_counter = try reader.takeInt(u32, .little);
             const vertex_count = try reader.takeInt(u32, .little);
-            const edge_count = try reader.takeInt(u32, .little);
+            const hyperedge_count = try reader.takeInt(u32, .little);
 
             var graph = try Self.init(allocator, .{
                 .vertices_capacity = vertex_count,
-                .hyperedges_capacity = edge_count,
+                .hyperedges_capacity = hyperedge_count,
             });
             errdefer graph.deinit();
             graph.id_counter = id_counter;
@@ -2603,7 +2611,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             // Hyperedges.
-            for (0..edge_count) |_| {
+            for (0..hyperedge_count) |_| {
                 const hid = try reader.takeInt(u32, .little);
                 const payload_len = try reader.takeInt(u32, .little);
                 const payload_bytes = try allocator.alloc(u8, payload_len);

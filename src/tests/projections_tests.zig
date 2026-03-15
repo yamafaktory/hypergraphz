@@ -149,7 +149,7 @@ test "get vertex-induced subhypergraph" {
     }
 }
 
-test "get edge-induced subhypergraph" {
+test "get hyperedge-induced subhypergraph" {
     // NotBuilt guard.
     {
         var graph = try h.scaffold();

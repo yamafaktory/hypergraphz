@@ -16,11 +16,11 @@ const Vertex = struct {};
 const Bench = struct {
     const Self = @This();
 
-    graph: HypergraphZ(Hyperedge, Vertex),
+    graph: HypergraphZ(Hyperedge, Vertex, .{}),
     io_single: std.Io.Threaded,
     lap_start: std.Io.Timestamp,
 
-    pub fn init(allocator: Allocator, comptime name: []const u8, config: HypergraphZ(Hyperedge, Vertex).HypergraphZConfig) !Self {
+    pub fn init(allocator: Allocator, comptime name: []const u8, config: HypergraphZ(Hyperedge, Vertex, .{}).HypergraphZConfig) !Self {
         var io_single: std.Io.Threaded = .init_single_threaded;
         const io = io_single.io();
 
@@ -29,7 +29,7 @@ const Bench = struct {
         try w.interface.print(comptimePrint("{s}...\n", .{name}), .{});
         try w.interface.flush();
 
-        const graph = try HypergraphZ(Hyperedge, Vertex).init(allocator, config);
+        const graph = try HypergraphZ(Hyperedge, Vertex, .{}).init(allocator, config);
         const lap_start = std.Io.Timestamp.now(io, .awake);
 
         return .{

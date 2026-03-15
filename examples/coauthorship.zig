@@ -21,14 +21,15 @@ const Researcher = struct {
     name: []const u8,
 };
 
-/// weight = citation count (required by HypergraphZ for all hyperedge types).
 const Paper = struct {
     title: []const u8,
     year: u16,
-    weight: usize,
+    citations: usize,
 };
 
-const Graph = hg.HypergraphZ(Paper, Researcher);
+// Use "citations" as the weight field for findShortestPath instead of the
+// default "weight", which lets the Paper type use a domain-appropriate name.
+const Graph = hg.HypergraphZ(Paper, Researcher, .{ .weight_field = "citations" });
 
 // ── Dual conversion helpers ───────────────────────────────────────────────────
 // getDual swaps vertices ↔ hyperedges while keeping the same generic type.
@@ -39,7 +40,7 @@ fn paperToResearcher(p: Paper) Researcher {
 }
 
 fn researcherToPaper(r: Researcher) Paper {
-    return .{ .title = r.name, .year = 0, .weight = 1 };
+    return .{ .title = r.name, .year = 0, .citations = 1 };
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -77,12 +78,12 @@ pub fn main() !void {
     const iris = try g.createVertexAssumeCapacity(.{ .name = "Iris Wang" });
 
     // Papers — weight is the citation count
-    const p1 = try g.createHyperedgeAssumeCapacity(.{ .title = "Distributed Consensus at Scale", .year = 2019, .weight = 142 });
-    const p2 = try g.createHyperedgeAssumeCapacity(.{ .title = "Fault-Tolerant Replication", .year = 2020, .weight = 89 });
-    const p3 = try g.createHyperedgeAssumeCapacity(.{ .title = "Scalable Distributed Joins", .year = 2021, .weight = 67 });
-    const p4 = try g.createHyperedgeAssumeCapacity(.{ .title = "Neural Architecture Search", .year = 2020, .weight = 95 });
-    const p5 = try g.createHyperedgeAssumeCapacity(.{ .title = "Optimization Landscapes", .year = 2021, .weight = 78 });
-    const p6 = try g.createHyperedgeAssumeCapacity(.{ .title = "Hyperparameter Optimization", .year = 2022, .weight = 61 });
+    const p1 = try g.createHyperedgeAssumeCapacity(.{ .title = "Distributed Consensus at Scale", .year = 2019, .citations = 142 });
+    const p2 = try g.createHyperedgeAssumeCapacity(.{ .title = "Fault-Tolerant Replication", .year = 2020, .citations = 89 });
+    const p3 = try g.createHyperedgeAssumeCapacity(.{ .title = "Scalable Distributed Joins", .year = 2021, .citations = 67 });
+    const p4 = try g.createHyperedgeAssumeCapacity(.{ .title = "Neural Architecture Search", .year = 2020, .citations = 95 });
+    const p5 = try g.createHyperedgeAssumeCapacity(.{ .title = "Optimization Landscapes", .year = 2021, .citations = 78 });
+    const p6 = try g.createHyperedgeAssumeCapacity(.{ .title = "Hyperparameter Optimization", .year = 2022, .citations = 61 });
 
     // Authorship — append researchers in author-list order
     try g.appendVerticesToHyperedge(p1, &.{ alice, bob, carol }); // Community A
@@ -153,7 +154,7 @@ pub fn main() !void {
     try w.interface.print("\n", .{});
 
     // ── 5. Degrees of separation ──────────────────────────────────────────────
-    // findShortestPath follows directed edges (corresponding author → co-authors).
+    // findShortestPath follows directed hyperedges (corresponding author → co-authors).
     // Researchers in different communities have no path between them.
 
     try w.interface.print("Degrees of separation\n", .{});
