@@ -38,10 +38,12 @@ pub const HypergraphZError = (error{
     CycleDetected,
     HyperedgeNotFound,
     IndexOutOfBounds,
+    InvalidMagicNumber,
     NoVerticesToInsert,
     NotBuilt,
     NotEnoughHyperedgesProvided,
     NotEnoughVerticesProvided,
+    UnsupportedVersion,
     VertexNotFound,
 } || Allocator.Error);
 
@@ -798,7 +800,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             var kept: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
             {
                 const h = try self._hyperedgePtr(id);
+
                 if (at == 0 or at >= h.relations.items.len) return HypergraphZError.IndexOutOfBounds;
+
                 try tail.appendSlice(aa, h.relations.items[at..]);
                 for (h.relations.items[0..at]) |v| {
                     try kept.put(aa, v, {});
@@ -2423,6 +2427,172 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
 
             return graph;
         }
+
+        // ============================================================
+        // Codec
+        // ============================================================
+
+        /// Magic number for the binary format: bytes 'H','G','P','Z' as little-endian u32.
+        const codec_magic: u32 = 0x5A504748;
+        /// Current binary format version.
+        const codec_version: u8 = 1;
+
+        /// Asserts at comptime that T is pointer-free: no field (recursively) has type
+        /// `.pointer`, which in Zig covers both raw pointers (`*T`) and slices (`[]T`).
+        /// Pointer-free types are fully self-contained within `@sizeOf(T)` bytes and
+        /// can be serialized by copying their raw memory.
+        fn assertPointerFree(comptime T: type) void {
+            inline for (std.meta.fields(T)) |field| {
+                switch (@typeInfo(field.type)) {
+                    .pointer => @compileError("defaultSerialize/defaultDeserialize: type '" ++
+                        @typeName(T) ++ "' has pointer/slice field '" ++ field.name ++
+                        "'; provide a custom codec"),
+                    .@"struct" => assertPointerFree(field.type),
+                    else => {},
+                }
+            }
+        }
+
+        /// Serialize a pointer-free value by writing its raw bytes (`@sizeOf(T)` bytes total).
+        /// Pointer-free means no field (recursively) is a pointer or slice.
+        /// Asserts this constraint at comptime; supply a custom codec for types that own heap data.
+        pub fn defaultSerialize(comptime T: type, val: T, writer: *std.Io.Writer) !void {
+            assertPointerFree(T);
+            try writer.writeAll(std.mem.asBytes(&val));
+        }
+
+        /// Deserialize a pointer-free value by reading its raw bytes (`@sizeOf(T)` bytes total).
+        /// Pointer-free means no field (recursively) is a pointer or slice.
+        /// Asserts this constraint at comptime; supply a custom codec for types that own heap data.
+        pub fn defaultDeserialize(comptime T: type, reader: *std.Io.Reader) !T {
+            assertPointerFree(T);
+            var buf: [@sizeOf(T)]u8 = undefined;
+            try reader.readSliceAll(&buf);
+            return std.mem.bytesToValue(T, &buf);
+        }
+
+        /// Save the hypergraph to `writer` using the supplied codec functions.
+        ///
+        /// `serializeH` is called as `serializeH(h_value, writer)` for each hyperedge payload.
+        /// `serializeV` is called as `serializeV(v_value, writer)` for each vertex payload.
+        /// All integers are written little-endian.
+        pub fn save(
+            self: *const Self,
+            writer: *std.Io.Writer,
+            comptime serializeH: anytype,
+            comptime serializeV: anytype,
+        ) !void {
+            // Header.
+            try writer.writeInt(u32, codec_magic, .little);
+            try writer.writeByte(codec_version);
+            try writer.writeInt(u32, self.id_counter, .little);
+            try writer.writeInt(u32, @intCast(self.vertices.count()), .little);
+            try writer.writeInt(u32, @intCast(self.hyperedges.count()), .little);
+
+            // Vertices.
+            var v_it = self.vertices.iterator();
+            while (v_it.next()) |kv| {
+                try writer.writeInt(u32, kv.key_ptr.*, .little);
+                var payload_w = std.Io.Writer.Allocating.init(self.allocator);
+                defer payload_w.deinit();
+                try serializeV(kv.value_ptr.data.*, &payload_w.writer);
+                const payload = payload_w.writer.buffer[0..payload_w.writer.end];
+                try writer.writeInt(u32, @intCast(payload.len), .little);
+                try writer.writeAll(payload);
+            }
+
+            // Hyperedges.
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
+                try writer.writeInt(u32, kv.key_ptr.*, .little);
+                var payload_w = std.Io.Writer.Allocating.init(self.allocator);
+                defer payload_w.deinit();
+                try serializeH(kv.value_ptr.data.*, &payload_w.writer);
+                const payload = payload_w.writer.buffer[0..payload_w.writer.end];
+                try writer.writeInt(u32, @intCast(payload.len), .little);
+                try writer.writeAll(payload);
+                const vtx = kv.value_ptr.relations.items;
+                try writer.writeInt(u32, @intCast(vtx.len), .little);
+                for (vtx) |vid| {
+                    try writer.writeInt(u32, vid, .little);
+                }
+            }
+        }
+
+        /// Load a hypergraph from `reader` using the supplied codec functions.
+        ///
+        /// `deserializeH` is called as `deserializeH(reader)` for each hyperedge payload.
+        /// `deserializeV` is called as `deserializeV(reader)` for each vertex payload.
+        /// The caller must call `build()` on the result before issuing queries.
+        pub fn load(
+            allocator: Allocator,
+            reader: *std.Io.Reader,
+            comptime deserializeH: anytype,
+            comptime deserializeV: anytype,
+        ) !Self {
+            // Header.
+            const magic = try reader.takeInt(u32, .little);
+
+            if (magic != codec_magic) return HypergraphZError.InvalidMagicNumber;
+
+            const version = try reader.takeByte();
+
+            if (version != codec_version) return HypergraphZError.UnsupportedVersion;
+
+            const id_counter = try reader.takeInt(u32, .little);
+            const vertex_count = try reader.takeInt(u32, .little);
+            const edge_count = try reader.takeInt(u32, .little);
+
+            var graph = try Self.init(allocator, .{
+                .vertices_capacity = vertex_count,
+                .hyperedges_capacity = edge_count,
+            });
+            errdefer graph.deinit();
+            graph.id_counter = id_counter;
+
+            // Vertices.
+            for (0..vertex_count) |_| {
+                const vid = try reader.takeInt(u32, .little);
+                const payload_len = try reader.takeInt(u32, .little);
+                const payload_bytes = try allocator.alloc(u8, payload_len);
+                defer allocator.free(payload_bytes);
+                try reader.readSliceAll(payload_bytes);
+                var payload_r = std.Io.Reader.fixed(payload_bytes);
+                const data = try deserializeV(&payload_r);
+                const new_data = try graph.vertices_pool.create(allocator);
+                new_data.* = data;
+                try graph.vertices.put(allocator, vid, .{
+                    .relations = .empty,
+                    .data = new_data,
+                });
+            }
+
+            // Hyperedges.
+            for (0..edge_count) |_| {
+                const hid = try reader.takeInt(u32, .little);
+                const payload_len = try reader.takeInt(u32, .little);
+                const payload_bytes = try allocator.alloc(u8, payload_len);
+                defer allocator.free(payload_bytes);
+                try reader.readSliceAll(payload_bytes);
+                var payload_r = std.Io.Reader.fixed(payload_bytes);
+                const data = try deserializeH(&payload_r);
+                const new_data = try graph.hyperedges_pool.create(allocator);
+                new_data.* = data;
+                const vtx_count = try reader.takeInt(u32, .little);
+                var vtx_list: ArrayListUnmanaged(HypergraphZId) = .empty;
+                try vtx_list.ensureTotalCapacity(allocator, vtx_count);
+                for (0..vtx_count) |_| {
+                    const vid = try reader.takeInt(u32, .little);
+                    vtx_list.appendAssumeCapacity(vid);
+                }
+                try graph.hyperedges.put(allocator, hid, .{
+                    .relations = vtx_list,
+                    .data = new_data,
+                });
+            }
+
+            return graph;
+        }
     };
 }
 
@@ -2433,4 +2603,5 @@ comptime {
     _ = @import("tests/traversal_tests.zig");
     _ = @import("tests/algorithms_tests.zig");
     _ = @import("tests/projections_tests.zig");
+    _ = @import("tests/codec_tests.zig");
 }
