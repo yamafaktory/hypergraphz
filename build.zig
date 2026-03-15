@@ -53,7 +53,7 @@ pub fn build(b: *std.Build) void {
     // Format step.
     const fmt_step = b.step("fmt", "Format all source files");
     const fmt = b.addFmt(.{
-        .paths = &.{ HypergraphZPath, BenchPath, "build.zig" },
+        .paths = &.{ HypergraphZPath, BenchPath, "build.zig", "src/tests" },
     });
     fmt_step.dependOn(&fmt.step);
 
