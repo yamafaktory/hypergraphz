@@ -157,6 +157,49 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             self.* = undefined;
         }
 
+        /// Return a fully independent copy of the hypergraph.
+        /// All vertex and hyperedge data is deep-copied into fresh pool entries,
+        /// so the clone can be safely used and deinited independently of the original.
+        /// The caller must call `build()` on the result and is responsible for calling `deinit()` on it.
+        /// The source graph must have `build()` called before cloning.
+        pub fn clone(self: *Self) HypergraphZError!Self {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+
+            var copy = try Self.init(self.allocator, .{
+                .vertices_capacity = self.vertices.count(),
+                .hyperedges_capacity = self.hyperedges.count(),
+            });
+            errdefer copy.deinit();
+
+            // Deep-copy vertices: fresh pool entry per vertex, relations rebuilt by build().
+            var v_it = self.vertices.iterator();
+            while (v_it.next()) |kv| {
+                const new_data = try copy.vertices_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
+                try copy.vertices.put(self.allocator, kv.key_ptr.*, .{
+                    .relations = .empty,
+                    .data = new_data,
+                });
+                copy.id_counter = @max(copy.id_counter, kv.key_ptr.*);
+            }
+
+            // Deep-copy hyperedges: fresh pool entry + duplicated relations slice.
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
+                const new_data = try copy.hyperedges_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
+                const owned = try self.allocator.dupe(HypergraphZId, kv.value_ptr.relations.items);
+                try copy.hyperedges.put(self.allocator, kv.key_ptr.*, .{
+                    .relations = ArrayListUnmanaged(HypergraphZId).fromOwnedSlice(owned),
+                    .data = new_data,
+                });
+                copy.id_counter = @max(copy.id_counter, kv.key_ptr.*);
+            }
+
+            debug("clone: {} vertices, {} hyperedges", .{ copy.vertices.count(), copy.hyperedges.count() });
+            return copy;
+        }
+
         /// Internal method to get an id.
         fn _getId(self: *Self) HypergraphZId {
             self.id_counter += 1;
@@ -2404,6 +2447,47 @@ fn generateTestData(graph: *HypergraphZ(Hyperedge, Vertex)) !Data {
         .h_b = h_b,
         .h_c = h_c,
     };
+}
+
+test "clone" {
+    // Error: not built.
+    {
+        var graph = try scaffold();
+        defer graph.deinit();
+        try expectError(HypergraphZError.NotBuilt, graph.clone());
+    }
+
+    var graph = try scaffold();
+    defer graph.deinit();
+    const d = try generateTestData(&graph);
+
+    var copy = try graph.clone();
+    defer copy.deinit();
+    try copy.build();
+
+    // Same counts.
+    try expect(copy.vertices.count() == graph.vertices.count());
+    try expect(copy.hyperedges.count() == graph.hyperedges.count());
+    try expect(copy.id_counter == graph.id_counter);
+
+    // Same hyperedge relations.
+    try expectEqualSlices(HypergraphZId, try graph.getHyperedgeVertices(d.h_a), try copy.getHyperedgeVertices(d.h_a));
+    try expectEqualSlices(HypergraphZId, try graph.getHyperedgeVertices(d.h_b), try copy.getHyperedgeVertices(d.h_b));
+    try expectEqualSlices(HypergraphZId, try graph.getHyperedgeVertices(d.h_c), try copy.getHyperedgeVertices(d.h_c));
+
+    // Same reverse index.
+    try expectEqualSlices(HypergraphZId, try graph.getVertexHyperedges(d.v_a), try copy.getVertexHyperedges(d.v_a));
+    try expectEqualSlices(HypergraphZId, try graph.getVertexHyperedges(d.v_e), try copy.getVertexHyperedges(d.v_e));
+
+    // Independence: mutating the copy does not affect the original.
+    try copy.deleteVertex(d.v_a);
+    try graph.checkIfVertexExists(d.v_a); // original still has v_a
+    try expectError(HypergraphZError.VertexNotFound, copy.checkIfVertexExists(d.v_a));
+
+    // Data is deep-copied: modifying clone's vertex data doesn't touch the original.
+    try copy.updateVertex(d.v_b, .{ .purr = true });
+    try expect((try graph.getVertex(d.v_b)).purr == false);
+    try expect((try copy.getVertex(d.v_b)).purr == true);
 }
 
 test "allocation failure" {
