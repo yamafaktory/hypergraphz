@@ -2639,7 +2639,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
     };
 }
 
-comptime {
+test {
     _ = @import("tests/core_tests.zig");
     _ = @import("tests/mutations_tests.zig");
     _ = @import("tests/queries_tests.zig");
