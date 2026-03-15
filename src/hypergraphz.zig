@@ -361,14 +361,22 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             }
 
             // Rebuild from the forward index.
-            // _addVertexRelation handles deduplication: a vertex appearing multiple
-            // times in a hyperedge is recorded only once in the reverse index.
+            // A per-hyperedge seen-set deduplicates vertices that appear multiple times
+            // in the same hyperedge in O(1) per occurrence, avoiding the O(d) scan that
+            // _addVertexRelation would perform for every entry.
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
             var h_it = self.hyperedges.iterator();
             while (h_it.next()) |*kv| {
                 const hyperedge_id = kv.key_ptr.*;
+                seen.clearRetainingCapacity();
                 for (kv.value_ptr.relations.items) |vertex_id| {
+                    const gop = try seen.getOrPut(aa, vertex_id);
+                    if (gop.found_existing) continue;
                     const vertex = self.vertices.getPtr(vertex_id).?;
-                    try self._addVertexRelation(vertex, hyperedge_id);
+                    try vertex.relations.append(self.allocator, hyperedge_id);
                 }
             }
 
@@ -630,7 +638,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
             // Release memory.
             vertex.relations.deinit(self.allocator);
 
-            // Delete the hyperedge itself.
+            // Delete the vertex itself.
             const removed = self.vertices.orderedRemove(id);
             assert(removed);
 
@@ -2031,8 +2039,10 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 try self.checkIfHyperedgeExists(h);
             }
 
-            var first = self.hyperedges.getPtr(hyperedges_ids[0]).?;
             for (hyperedges_ids[1..]) |h| {
+                // Re-fetch on every iteration: orderedRemove below shifts the hashmap's
+                // internal array, which would invalidate a pointer cached outside the loop.
+                const first = self.hyperedges.getPtr(hyperedges_ids[0]).?;
                 const hyperedge = self.hyperedges.getPtr(h).?;
                 const items = hyperedge.relations.items;
 
@@ -2135,9 +2145,13 @@ pub fn HypergraphZ(comptime H: type, comptime V: type) type {
                 var it_h = result.data.iterator();
                 while (it_h.next()) |*kv| {
                     var h = self.hyperedges.getPtr(kv.key_ptr.*).?;
-                    for (h.relations.items, 0..) |v, i| {
+                    // Use a while loop so that h.relations.items.len is re-evaluated
+                    // each iteration — orderedRemove inside the loop shrinks the slice,
+                    // and a captured for-range would read stale data on the last step.
+                    var i: usize = 0;
+                    while (i < h.relations.items.len) : (i += 1) {
                         // In each hyperedge, replace the current vertex with the last one.
-                        if (v == d.*) {
+                        if (h.relations.items[i] == d.*) {
                             h.relations.items[i] = last;
                             // If the next vertex is also the last one, remove it.
                             if (i + 1 < h.relations.items.len and h.relations.items[i + 1] == last) {
