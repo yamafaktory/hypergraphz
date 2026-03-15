@@ -1,6 +1,7 @@
 const std = @import("std");
 const HypergraphZPath = "src/hypergraphz.zig";
 const BenchPath = "src/bench.zig";
+const TestRootPath = "tests/root.zig";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -13,14 +14,17 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const test_module = b.createModule(.{
+        .root_source_file = b.path(TestRootPath),
+        .imports = &.{.{ .name = "hypergraphz", .module = root_module }},
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const unit_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/test_root.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = test_module,
     });
 
     const run_lib_unit_tests = b.addRunArtifact(unit_tests);
@@ -57,18 +61,14 @@ pub fn build(b: *std.Build) void {
     // Format step.
     const fmt_step = b.step("fmt", "Format all source files");
     const fmt = b.addFmt(.{
-        .paths = &.{ HypergraphZPath, BenchPath, "build.zig", "src/tests", "examples" },
+        .paths = &.{ HypergraphZPath, BenchPath, "build.zig", "tests", "examples" },
     });
     fmt_step.dependOn(&fmt.step);
 
     // Check step used by the zls configuration.
     const check_step = b.step("check", "Check if HypergraphZ compiles");
     const check = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/test_root.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
+        .root_module = test_module,
     });
     check_step.dependOn(&check.step);
     const bench_check = b.addExecutable(.{

@@ -1,5 +1,5 @@
 const std = @import("std");
-const hg = @import("../hypergraphz.zig");
+const hg = @import("hypergraphz");
 
 pub const HypergraphZ = hg.HypergraphZ;
 pub const HypergraphZId = hg.HypergraphZId;

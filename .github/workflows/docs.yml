@@ -9,10 +9,12 @@ jobs:
   upload-artifacts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
+      - uses: actions/checkout@v6.0.2
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: "0.16.0-dev.2905+5d71e3051"
       - run: zig build docs
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4.0.0
         with:
           path: zig-out/docs/
   
@@ -27,4 +29,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4.0.5

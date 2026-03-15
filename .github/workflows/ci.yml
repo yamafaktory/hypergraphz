@@ -10,8 +10,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-      - run: zig fmt --check src/ build.zig examples/
+      - uses: actions/checkout@v6.0.2
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: "0.16.0-dev.2905+5d71e3051"
+      - run: zig fmt --check src/ build.zig tests/ examples/
       - run: zig build check
       - run: zig build test --summary all
