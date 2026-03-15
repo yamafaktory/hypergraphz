@@ -53,7 +53,7 @@ pub fn build(b: *std.Build) void {
     // Format step.
     const fmt_step = b.step("fmt", "Format all source files");
     const fmt = b.addFmt(.{
-        .paths = &.{ HypergraphZPath, BenchPath, "build.zig", "src/tests" },
+        .paths = &.{ HypergraphZPath, BenchPath, "build.zig", "src/tests", "examples" },
     });
     fmt_step.dependOn(&fmt.step);
 
@@ -72,6 +72,20 @@ pub fn build(b: *std.Build) void {
         }),
     });
     check_step.dependOn(&bench_check.step);
+
+    // Example step.
+    const example_step = b.step("example", "Run the co-authorship network example");
+    const example_exe = b.addExecutable(.{
+        .name = "coauthorship",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/coauthorship.zig"),
+            .imports = &.{.{ .name = "hypergraphz", .module = root_module }},
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    example_step.dependOn(&b.addRunArtifact(example_exe).step);
+    check_step.dependOn(&example_exe.step);
 
     // Bench step.
     const bench_source_file = b.path(BenchPath);

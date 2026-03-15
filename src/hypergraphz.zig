@@ -23,21 +23,16 @@
 //! Each message is automatically prefixed with the name of the function that produced it,
 //! e.g. `[hypergraphz] (debug): [appendVertexToHyperedge] vertex 1 appended to hyperedge 3`.
 //!
-//! To enable debug output in tests, set the log level before running:
+//! Debug messages are **silent by default**. To enable them, set the runtime log level
+//! before your operations:
 //!
 //! ```zig
-//! std.testing.log_level = .debug;
+//! const hg = @import("hypergraphz");
+//! hg.log_level = .debug;
 //! ```
 //!
-//! To filter only HypergraphZ messages in a host application, configure the scope level:
-//!
-//! ```zig
-//! pub const std_options: std.Options = .{
-//!     .log_scope_levels = &.{
-//!         .{ .scope = .hypergraphz, .level = .debug },
-//!     },
-//! };
-//! ```
+//! In tests, verbosity is controlled separately via `std.testing.log_level` (set to `.debug`
+//! by default in HypergraphZ's own test scaffold).
 
 const std = @import("std");
 
@@ -53,11 +48,22 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.hypergraphz);
 const window = std.mem.window;
 
+/// Runtime log level for HypergraphZ debug messages. Defaults to `.warn` (silent).
+/// Set to `.debug` to enable per-operation trace output.
+/// In test builds, `std.testing.log_level` controls verbosity independently.
+pub var log_level: std.log.Level = .warn;
+
 /// Emit a debug log line prefixed with the calling function's name.
+/// In test builds: always forwards to std.log, gated by std.testing.log_level.
+/// In non-test builds: gated by the `log_level` variable above.
 /// Usage: debugAt(@src(), "message {}", .{arg});
 /// Output: [hypergraphz] (debug): [functionName] message arg
 inline fn debugAt(comptime src: std.builtin.SourceLocation, comptime fmt: []const u8, args: anytype) void {
-    log.debug("[" ++ src.fn_name ++ "] " ++ fmt, args);
+    const emit = @import("builtin").is_test or
+        @intFromEnum(std.log.Level.debug) <= @intFromEnum(log_level);
+    if (emit) {
+        log.debug("[" ++ src.fn_name ++ "] " ++ fmt, args);
+    }
 }
 
 pub const HypergraphZId = u32;
