@@ -12,4 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
+      - run: zig fmt --check src/ build.zig examples/
+      - run: zig build check
       - run: zig build test --summary all
