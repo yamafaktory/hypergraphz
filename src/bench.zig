@@ -5,7 +5,7 @@ const hypergraphz = @import("hypergraphz.zig");
 
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const GeneralPurposeAllocator = std.heap.DebugAllocator;
+const DebugAllocator = std.heap.DebugAllocator;
 const HypergraphZ = hypergraphz.HypergraphZ;
 const HypergraphZId = hypergraphz.HypergraphZId;
 const comptimePrint = std.fmt.comptimePrint;
@@ -61,7 +61,7 @@ const Bench = struct {
 };
 
 pub fn main() !void {
-    var gpa = GeneralPurposeAllocator(.{}){};
+    var gpa = DebugAllocator(.{}){};
     const allocator = gpa.allocator();
 
     // Bench 1: atomic insertions (build phase only, no reverse index overhead).

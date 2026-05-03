@@ -2267,9 +2267,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             // Copy all vertices preserving their IDs.
             var v_it = self.vertices.iterator();
             while (v_it.next()) |kv| {
+                const new_data = try skeleton.vertices_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
                 try skeleton.vertices.put(self.allocator, kv.key_ptr.*, .{
                     .relations = .empty,
-                    .data = kv.value_ptr.data,
+                    .data = new_data,
                 });
                 skeleton.id_counter = @max(skeleton.id_counter, kv.key_ptr.*);
             }
@@ -2278,13 +2280,15 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             var h_it = self.hyperedges.iterator();
             while (h_it.next()) |kv| {
                 if (kv.value_ptr.relations.items.len > k) continue;
+                const new_data = try skeleton.hyperedges_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
                 const owned = try self.allocator.dupe(
                     HypergraphZId,
                     kv.value_ptr.relations.items,
                 );
                 try skeleton.hyperedges.put(self.allocator, kv.key_ptr.*, .{
                     .relations = ArrayList(HypergraphZId).fromOwnedSlice(owned),
-                    .data = kv.value_ptr.data,
+                    .data = new_data,
                 });
                 skeleton.id_counter = @max(skeleton.id_counter, kv.key_ptr.*);
             }
@@ -2324,9 +2328,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             // Copy the requested vertices preserving their IDs.
             for (vertex_ids) |id| {
                 const kv = self.vertices.getEntry(id).?;
+                const new_data = try sub.vertices_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
                 try sub.vertices.put(self.allocator, id, .{
                     .relations = .empty,
-                    .data = kv.value_ptr.data,
+                    .data = new_data,
                 });
                 sub.id_counter = @max(sub.id_counter, id);
             }
@@ -2339,10 +2345,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                     if (!vertex_set.contains(v)) break false;
                 } else true;
                 if (!all_in_set) continue;
+                const new_data = try sub.hyperedges_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
                 const owned = try self.allocator.dupe(HypergraphZId, relations);
                 try sub.hyperedges.put(self.allocator, kv.key_ptr.*, .{
                     .relations = ArrayList(HypergraphZId).fromOwnedSlice(owned),
-                    .data = kv.value_ptr.data,
+                    .data = new_data,
                 });
                 sub.id_counter = @max(sub.id_counter, kv.key_ptr.*);
             }
@@ -2388,9 +2396,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             while (v_it.next()) |id_ptr| {
                 const id = id_ptr.*;
                 const kv = self.vertices.getEntry(id).?;
+                const new_data = try sub.vertices_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
                 try sub.vertices.put(self.allocator, id, .{
                     .relations = .empty,
-                    .data = kv.value_ptr.data,
+                    .data = new_data,
                 });
                 sub.id_counter = @max(sub.id_counter, id);
             }
@@ -2398,10 +2408,12 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             // Copy the requested hyperedges preserving their IDs.
             for (hyperedge_ids) |hid| {
                 const kv = self.hyperedges.getEntry(hid).?;
+                const new_data = try sub.hyperedges_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
                 const owned = try self.allocator.dupe(HypergraphZId, kv.value_ptr.relations.items);
                 try sub.hyperedges.put(self.allocator, hid, .{
                     .relations = ArrayList(HypergraphZId).fromOwnedSlice(owned),
-                    .data = kv.value_ptr.data,
+                    .data = new_data,
                 });
                 sub.id_counter = @max(sub.id_counter, hid);
             }
@@ -2445,9 +2457,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             // Copy all vertices preserving their IDs.
             var v_it = self.vertices.iterator();
             while (v_it.next()) |kv| {
+                const new_data = try graph.vertices_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
                 try graph.vertices.put(self.allocator, kv.key_ptr.*, .{
                     .relations = .empty,
-                    .data = kv.value_ptr.data,
+                    .data = new_data,
                 });
                 graph.id_counter = @max(graph.id_counter, kv.key_ptr.*);
             }
