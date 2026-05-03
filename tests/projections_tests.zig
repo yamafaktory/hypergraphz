@@ -329,3 +329,87 @@ test "projection results own their data independently" {
     try expect((try e_sub.getVertex(data.v_a)).purr == true);
     try expect((try expanded.getVertex(data.v_a)).purr == true);
 }
+
+test "incidence matrix" {
+    var graph = try h.scaffold();
+    defer graph.deinit();
+
+    // Empty graph: 0x0 matrix.
+    {
+        var m = try graph.toIncidenceMatrix(std.testing.allocator);
+        defer m.deinit(std.testing.allocator);
+        try expect(m.rows == 0);
+        try expect(m.cols == 0);
+        try expect(m.data.len == 0);
+    }
+
+    const data = try h.generateTestData(&graph);
+
+    var m = try graph.toIncidenceMatrix(std.testing.allocator);
+    defer m.deinit(std.testing.allocator);
+
+    // 5 vertices, 3 hyperedges.
+    try expect(m.rows == 5);
+    try expect(m.cols == 3);
+    try expectEqualSlices(
+        HypergraphZId,
+        &.{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_e },
+        m.vertex_ids,
+    );
+    try expectEqualSlices(
+        HypergraphZId,
+        &.{ data.h_a, data.h_b, data.h_c },
+        m.hyperedge_ids,
+    );
+
+    // h_a contains all 5 vertices → column 0 is all 1s.
+    for (0..5) |row| try expect(m.at(row, 0) == 1);
+
+    // h_b contains v_e (twice) and v_a → column 1 has 1s only at v_a (row 0) and v_e (row 4).
+    try expect(m.at(0, 1) == 1);
+    try expect(m.at(1, 1) == 0);
+    try expect(m.at(2, 1) == 0);
+    try expect(m.at(3, 1) == 0);
+    try expect(m.at(4, 1) == 1);
+
+    // h_c contains v_b, v_c (twice), v_e, v_a, v_d, v_b (twice) → all 5 are present.
+    for (0..5) |row| try expect(m.at(row, 2) == 1);
+}
+
+test "incidence matrix COO" {
+    var graph = try h.scaffold();
+    defer graph.deinit();
+
+    // Empty graph: 0x0 with no entries.
+    {
+        var m = try graph.toIncidenceMatrixCOO(std.testing.allocator);
+        defer m.deinit(std.testing.allocator);
+        try expect(m.rows == 0);
+        try expect(m.cols == 0);
+        try expect(m.entries.len == 0);
+    }
+
+    const data = try h.generateTestData(&graph);
+    _ = data;
+
+    var m = try graph.toIncidenceMatrixCOO(std.testing.allocator);
+    defer m.deinit(std.testing.allocator);
+
+    try expect(m.rows == 5);
+    try expect(m.cols == 3);
+
+    // h_a (col 0): all 5 vertices → 5 entries.
+    // h_b (col 1): {v_a, v_e} after dedup → 2 entries.
+    // h_c (col 2): {v_b, v_c, v_e, v_a, v_d} after dedup → 5 entries.
+    // Total: 12 entries.
+    try expect(m.entries.len == 12);
+
+    // Cross-check against the dense matrix: COO entries must exactly match
+    // the set of 1-positions, and no duplicates may be emitted.
+    var dense = try graph.toIncidenceMatrix(std.testing.allocator);
+    defer dense.deinit(std.testing.allocator);
+    var ones: usize = 0;
+    for (dense.data) |b| ones += b;
+    try expect(ones == m.entries.len);
+    for (m.entries) |e| try expect(dense.at(e.row, e.col) == 1);
+}

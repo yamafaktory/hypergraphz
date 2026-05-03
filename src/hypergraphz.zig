@@ -2505,6 +2505,163 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             return graph;
         }
 
+        /// Dense `n × m` incidence matrix where `n = countVertices()` and
+        /// `m = countHyperedges()`. `at(row, col) == 1` iff that vertex appears
+        /// in that hyperedge (multiplicity is collapsed to 0/1, matching the
+        /// standard textbook formulation `H ∈ {0,1}^{n×m}`).
+        /// Rows and columns are ordered by `getAllVertices()` and
+        /// `getAllHyperedges()` respectively; the corresponding ID arrays
+        /// are returned alongside so callers can map between row/column
+        /// indices and graph IDs.
+        /// The caller is responsible for freeing the memory with `deinit`.
+        pub const IncidenceMatrix = struct {
+            rows: usize,
+            cols: usize,
+            data: []u8,
+            vertex_ids: []HypergraphZId,
+            hyperedge_ids: []HypergraphZId,
+
+            pub fn at(self: *const IncidenceMatrix, row: usize, col: usize) u8 {
+                assert(row < self.rows);
+                assert(col < self.cols);
+                return self.data[row * self.cols + col];
+            }
+
+            pub fn deinit(self: *IncidenceMatrix, allocator: Allocator) void {
+                allocator.free(self.data);
+                allocator.free(self.vertex_ids);
+                allocator.free(self.hyperedge_ids);
+                self.* = undefined;
+            }
+        };
+
+        /// Build the dense incidence matrix of the hypergraph.
+        /// Complexity: O(n·m) for the allocation plus O(Σ|e|) for population.
+        /// For very large or sparse hypergraphs this can be memory-heavy
+        /// (n·m bytes); consider iterating `hyperedges` directly instead.
+        pub fn toIncidenceMatrix(self: *Self, allocator: Allocator) HypergraphZError!IncidenceMatrix {
+            const rows = self.vertices.count();
+            const cols = self.hyperedges.count();
+
+            const data = try allocator.alloc(u8, rows * cols);
+            errdefer allocator.free(data);
+            @memset(data, 0);
+
+            const vertex_ids = try allocator.dupe(HypergraphZId, self.vertices.keys());
+            errdefer allocator.free(vertex_ids);
+            const hyperedge_ids = try allocator.dupe(HypergraphZId, self.hyperedges.keys());
+            errdefer allocator.free(hyperedge_ids);
+
+            // Vertex id → row index lookup. Arena-scoped: only needed during fill.
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            var vertex_index: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            try vertex_index.ensureTotalCapacity(arena.allocator(), @intCast(rows));
+            for (vertex_ids, 0..) |vid, row| {
+                vertex_index.putAssumeCapacity(vid, row);
+            }
+
+            for (hyperedge_ids, 0..) |hid, col| {
+                const hyperedge = self.hyperedges.getPtr(hid).?;
+                for (hyperedge.relations.items) |vid| {
+                    const row = vertex_index.get(vid).?;
+                    data[row * cols + col] = 1;
+                }
+            }
+
+            debugAt(@src(), "{}x{} incidence matrix built", .{ rows, cols });
+
+            return .{
+                .rows = rows,
+                .cols = cols,
+                .data = data,
+                .vertex_ids = vertex_ids,
+                .hyperedge_ids = hyperedge_ids,
+            };
+        }
+
+        /// Sparse `n × m` incidence matrix in COO (Coordinate List) format.
+        /// Each entry is a non-zero `(row, col)` pair; the value is implicitly 1
+        /// since multiplicity is collapsed to 0/1, matching `H ∈ {0,1}^{n×m}`.
+        /// Entries are emitted in column-major order: all entries for hyperedge 0
+        /// come first (in vertex-id-of-first-occurrence order within that
+        /// hyperedge), then hyperedge 1, etc.
+        /// Rows and columns map to graph IDs via `vertex_ids` and `hyperedge_ids`.
+        /// The caller is responsible for freeing the memory with `deinit`.
+        pub const IncidenceMatrixCOO = struct {
+            rows: usize,
+            cols: usize,
+            entries: []Entry,
+            vertex_ids: []HypergraphZId,
+            hyperedge_ids: []HypergraphZId,
+
+            pub const Entry = struct {
+                row: u32,
+                col: u32,
+            };
+
+            pub fn deinit(self: *IncidenceMatrixCOO, allocator: Allocator) void {
+                allocator.free(self.entries);
+                allocator.free(self.vertex_ids);
+                allocator.free(self.hyperedge_ids);
+                self.* = undefined;
+            }
+        };
+
+        /// Build the sparse incidence matrix in COO format.
+        /// Memory is O(nnz) where nnz is the total number of unique
+        /// (vertex, hyperedge) incidences — far smaller than the dense form
+        /// for typical hypergraphs. Use this when n·m would be prohibitive.
+        pub fn toIncidenceMatrixCOO(self: *Self, allocator: Allocator) HypergraphZError!IncidenceMatrixCOO {
+            const rows = self.vertices.count();
+            const cols = self.hyperedges.count();
+
+            const vertex_ids = try allocator.dupe(HypergraphZId, self.vertices.keys());
+            errdefer allocator.free(vertex_ids);
+            const hyperedge_ids = try allocator.dupe(HypergraphZId, self.hyperedges.keys());
+            errdefer allocator.free(hyperedge_ids);
+
+            // Vertex id → row index lookup, plus a per-hyperedge seen-set to
+            // collapse duplicate vertices within a hyperedge to a single entry.
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+            var vertex_index: AutoHashMapUnmanaged(HypergraphZId, u32) = .empty;
+            try vertex_index.ensureTotalCapacity(aa, @intCast(rows));
+            for (vertex_ids, 0..) |vid, row| {
+                vertex_index.putAssumeCapacity(vid, @intCast(row));
+            }
+
+            var entries: ArrayList(IncidenceMatrixCOO.Entry) = .empty;
+            errdefer entries.deinit(allocator);
+
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            for (hyperedge_ids, 0..) |hid, col| {
+                const hyperedge = self.hyperedges.getPtr(hid).?;
+                seen.clearRetainingCapacity();
+                for (hyperedge.relations.items) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (gop.found_existing) continue;
+                    try entries.append(allocator, .{
+                        .row = vertex_index.get(vid).?,
+                        .col = @intCast(col),
+                    });
+                }
+            }
+
+            const owned = try entries.toOwnedSlice(allocator);
+
+            debugAt(@src(), "{}x{} COO matrix built with {} entries", .{ rows, cols, owned.len });
+
+            return .{
+                .rows = rows,
+                .cols = cols,
+                .entries = owned,
+                .vertex_ids = vertex_ids,
+                .hyperedge_ids = hyperedge_ids,
+            };
+        }
+
         // ============================================================
         // Codec
         // ============================================================
