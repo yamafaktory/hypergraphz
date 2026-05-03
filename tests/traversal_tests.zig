@@ -281,3 +281,19 @@ test "get transitive closure" {
         try expect((try closure.getHyperedge(new_id)).weight == 42);
     }
 }
+
+test "transitive closure owns its data independently" {
+    var graph = try h.scaffold();
+    const data = try h.generateTestData(&graph);
+
+    var closure = try graph.getTransitiveClosure(defaultPairToHyperedge);
+    defer closure.deinit();
+
+    // Mutating the closure must not bleed into the parent.
+    try closure.updateVertex(data.v_a, .{ .purr = true });
+    try expect((try graph.getVertex(data.v_a)).purr == false);
+
+    // Deinit'ing the parent must leave the closure fully usable.
+    graph.deinit();
+    try expect((try closure.getVertex(data.v_a)).purr == true);
+}

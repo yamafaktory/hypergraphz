@@ -1674,6 +1674,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// `u` via one or more directed hops. Self-loops `[u, u]` are included
         /// only when `u` lies on a cycle.
         /// `pairToHyperedge` produces the hyperedge data for each `(from, to)` pair.
+        /// The result owns deep copies of all vertex and hyperedge data and may be
+        /// safely mutated independently of the source.
         /// The caller must call `build()` on the result and is responsible for
         /// calling `deinit()` on it.
         ///
@@ -1699,9 +1701,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             // Copy all vertices preserving their IDs.
             var v_it = self.vertices.iterator();
             while (v_it.next()) |kv| {
+                const new_data = try closure.vertices_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
                 try closure.vertices.put(self.allocator, kv.key_ptr.*, .{
                     .relations = .empty,
-                    .data = kv.value_ptr.data,
+                    .data = new_data,
                 });
                 closure.id_counter = @max(closure.id_counter, kv.key_ptr.*);
             }
