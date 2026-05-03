@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v6.0.2
       - uses: mlugg/setup-zig@v2.2.1
         with:
-          version: "0.17.0-dev.13+113f79a1"
+          version: "0.17.0-dev.242+5d55999d2"
           use-cache: false
       - run: zig build docs
       - uses: actions/upload-pages-artifact@v4.0.0
