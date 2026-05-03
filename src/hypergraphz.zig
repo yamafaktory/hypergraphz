@@ -2253,6 +2253,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Return the k-skeleton of the hypergraph: a new hypergraph containing
         /// all vertices and only the hyperedges whose raw vertex count is at
         /// most `k` (i.e. `hyperedge.relations.len <= k`).
+        /// The result owns deep copies of all vertex and hyperedge data and may be
+        /// safely mutated independently of the source.
         /// The caller must call `build()` on the result and is responsible for
         /// calling `deinit()` on it.
         pub fn getKSkeleton(self: *Self, k: usize) HypergraphZError!Self {
@@ -2305,6 +2307,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Return the vertex-induced subhypergraph: a new hypergraph containing
         /// exactly the specified vertices and only the hyperedges whose entire
         /// vertex list is a subset of those vertices (strict).
+        /// The result owns deep copies of all vertex and hyperedge data and may be
+        /// safely mutated independently of the source.
         /// The caller must call `build()` on the result and is responsible for
         /// calling `deinit()` on it.
         pub fn getVertexInducedSubhypergraph(self: *Self, vertex_ids: []const HypergraphZId) HypergraphZError!Self {
@@ -2366,6 +2370,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Return the hyperedge-induced subhypergraph: a new hypergraph containing
         /// exactly the specified hyperedges and only the vertices that appear
         /// in at least one of them.
+        /// The result owns deep copies of all vertex and hyperedge data and may be
+        /// safely mutated independently of the source.
         /// The caller must call `build()` on the result and is responsible for
         /// calling `deinit()` on it.
         pub fn getEdgeInducedSubhypergraph(self: *Self, hyperedge_ids: []const HypergraphZId) HypergraphZError!Self {
@@ -2443,14 +2449,24 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// replacing each hyperedge with its constituent directed pairs.
         /// Each window pair `(a, b)` becomes its own 2-vertex hyperedge,
         /// inheriting the original hyperedge's data. Duplicate pairs are kept.
+        /// The result owns deep copies of all vertex and hyperedge data and may be
+        /// safely mutated independently of the source.
         /// The caller must call `build()` on the result and is responsible for
         /// calling `deinit()` on it.
         pub fn expandToGraph(self: *Self) HypergraphZError!Self {
             if (!self.is_built) return HypergraphZError.NotBuilt;
 
+            // Each n-vertex hyperedge expands into (n - 1) pair-hyperedges.
+            var hyperedge_count: usize = 0;
+            var c_it = self.hyperedges.iterator();
+            while (c_it.next()) |kv| {
+                const n = kv.value_ptr.relations.items.len;
+                if (n >= 2) hyperedge_count += n - 1;
+            }
+
             var graph = try Self.init(self.allocator, .{
                 .vertices_capacity = self.vertices.count(),
-                .hyperedges_capacity = self.hyperedges.count(),
+                .hyperedges_capacity = hyperedge_count,
             });
             errdefer graph.deinit();
 

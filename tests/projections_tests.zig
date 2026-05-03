@@ -299,3 +299,33 @@ test "get dual" {
         _ = data;
     }
 }
+
+test "projection results own their data independently" {
+    var graph = try h.scaffold();
+    const data = try h.generateTestData(&graph);
+
+    var skeleton = try graph.getKSkeleton(7);
+    defer skeleton.deinit();
+    var v_sub = try graph.getVertexInducedSubhypergraph(
+        &.{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_e },
+    );
+    defer v_sub.deinit();
+    var e_sub = try graph.getEdgeInducedSubhypergraph(&.{data.h_a});
+    defer e_sub.deinit();
+    var expanded = try graph.expandToGraph();
+    defer expanded.deinit();
+
+    // Mutating any result must not bleed into the parent.
+    try skeleton.updateVertex(data.v_a, .{ .purr = true });
+    try v_sub.updateVertex(data.v_a, .{ .purr = true });
+    try e_sub.updateVertex(data.v_a, .{ .purr = true });
+    try expanded.updateVertex(data.v_a, .{ .purr = true });
+    try expect((try graph.getVertex(data.v_a)).purr == false);
+
+    // Deinit'ing the parent must leave every result fully usable.
+    graph.deinit();
+    try expect((try skeleton.getVertex(data.v_a)).purr == true);
+    try expect((try v_sub.getVertex(data.v_a)).purr == true);
+    try expect((try e_sub.getVertex(data.v_a)).purr == true);
+    try expect((try expanded.getVertex(data.v_a)).purr == true);
+}
