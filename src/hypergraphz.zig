@@ -38,9 +38,9 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayList;
 const AutoHashMapUnmanaged = std.AutoHashMapUnmanaged;
-const AutoArrayHashMapUnmanaged = std.array_hash_map.AutoArrayHashMapUnmanaged;
+const AutoArrayHashMap = std.array_hash_map.Auto;
 const MemoryPool = std.heap.MemoryPool;
 const MultiArrayList = std.MultiArrayList;
 const PriorityQueue = std.PriorityQueue;
@@ -100,11 +100,11 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// The allocator used by the HypergraphZ instance.
         allocator: Allocator,
         /// A hashmap of hyperedges data and relations.
-        hyperedges: AutoArrayHashMapUnmanaged(HypergraphZId, HyperedgeDataRelations),
+        hyperedges: AutoArrayHashMap(HypergraphZId, HyperedgeDataRelations),
         /// A memory pool for hyperedges data.
         hyperedges_pool: MemoryPool(H),
         /// A hashmap of vertices data and relations.
-        vertices: AutoArrayHashMapUnmanaged(HypergraphZId, VertexDataRelations),
+        vertices: AutoArrayHashMap(HypergraphZId, VertexDataRelations),
         /// A memory pool for vertices data.
         vertices_pool: MemoryPool(V),
         /// Internal counter for both the hyperedges and vertices ids.
@@ -131,13 +131,13 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Vertex representation with data and relations as an array list.
         const VertexDataRelations = struct {
             data: *V,
-            relations: ArrayListUnmanaged(HypergraphZId),
+            relations: ArrayList(HypergraphZId),
         };
 
         /// Hyperedge representation with data and relations as an array list.
         const HyperedgeDataRelations = struct {
             data: *H,
-            relations: ArrayListUnmanaged(HypergraphZId),
+            relations: ArrayList(HypergraphZId),
         };
 
         /// Configuration struct for the HypergraphZ instance.
@@ -156,8 +156,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         pub fn init(allocator: Allocator, config: HypergraphZConfig) HypergraphZError!Self {
             // We use an array list for hyperedges and an array hashmap for vertices.
             // The hyperedges can't be a hashmap since a hyperedge can contain the same vertex multiple times.
-            var h: AutoArrayHashMapUnmanaged(HypergraphZId, HyperedgeDataRelations) = .empty;
-            var v: AutoArrayHashMapUnmanaged(HypergraphZId, VertexDataRelations) = .empty;
+            var h: AutoArrayHashMap(HypergraphZId, HyperedgeDataRelations) = .empty;
+            var v: AutoArrayHashMap(HypergraphZId, VertexDataRelations) = .empty;
 
             // Memory pools for hyperedges and vertices.
             var h_pool: MemoryPool(H) = .empty;
@@ -239,7 +239,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 new_data.* = kv.value_ptr.data.*;
                 const owned = try self.allocator.dupe(HypergraphZId, kv.value_ptr.relations.items);
                 try copy.hyperedges.put(self.allocator, kv.key_ptr.*, .{
-                    .relations = ArrayListUnmanaged(HypergraphZId).fromOwnedSlice(owned),
+                    .relations = ArrayList(HypergraphZId).fromOwnedSlice(owned),
                     .data = new_data,
                 });
                 copy.id_counter = @max(copy.id_counter, kv.key_ptr.*);
@@ -649,7 +649,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
 
             // The same vertex can appear multiple times within a hyperedge.
             // Create a temporary list to store the relations without the vertex.
-            var tmp: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var tmp: ArrayList(HypergraphZId) = .empty;
             defer tmp.deinit(self.allocator);
             for (hyperedge.relations.items) |v| {
                 if (v != vertex_id) {
@@ -657,7 +657,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 }
             }
             // Swap the temporary list with the hyperedge relations.
-            std.mem.swap(ArrayListUnmanaged(HypergraphZId), &hyperedge.relations, &tmp);
+            std.mem.swap(ArrayList(HypergraphZId), &hyperedge.relations, &tmp);
 
             const vertex = try self._vertexPtr(vertex_id);
             const removed = _removeVertexRelation(vertex, hyperedge_id);
@@ -746,7 +746,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 // Delete the vertex from the hyperedge relations.
                 // The same vertex can appear multiple times within a hyperedge.
                 // Create a temporary list to store the relations without the vertex.
-                var tmp: ArrayListUnmanaged(HypergraphZId) = .empty;
+                var tmp: ArrayList(HypergraphZId) = .empty;
                 defer tmp.deinit(self.allocator);
                 for (hyperedge.relations.items) |v| {
                     if (v != id) {
@@ -754,7 +754,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                     }
                 }
                 // Swap the temporary list with the hyperedge relations.
-                std.mem.swap(ArrayListUnmanaged(HypergraphZId), &hyperedge.relations, &tmp);
+                std.mem.swap(ArrayList(HypergraphZId), &hyperedge.relations, &tmp);
             }
 
             // Remove from the vertices pool.
@@ -775,7 +775,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             const hyperedge = try self._hyperedgePtr(hyperedge_id);
             const tmp = try hyperedge.relations.toOwnedSlice(self.allocator);
             std.mem.reverse(HypergraphZId, tmp);
-            hyperedge.relations = ArrayListUnmanaged(HypergraphZId).fromOwnedSlice(tmp);
+            hyperedge.relations = ArrayList(HypergraphZId).fromOwnedSlice(tmp);
             debugAt(@src(), "hyperedge {} reversed", .{hyperedge_id});
         }
 
@@ -839,7 +839,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
 
             // Validate and snapshot the tail vertices before any mutations.
             // (createHyperedge may resize self.hyperedges, invalidating prior pointers.)
-            var tail: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var tail: ArrayList(HypergraphZId) = .empty;
             var kept: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
             {
                 const h = try self._hyperedgePtr(id);
@@ -1099,7 +1099,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Keys are hyperedge ids; values are the list of adjacent vertices in that hyperedge.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const AdjacencyResult = struct {
-            data: AutoArrayHashMapUnmanaged(HypergraphZId, ArrayListUnmanaged(HypergraphZId)),
+            data: AutoArrayHashMap(HypergraphZId, ArrayList(HypergraphZId)),
 
             pub fn deinit(self: *AdjacencyResult, allocator: Allocator) void {
                 // Deinit the array lists.
@@ -1123,7 +1123,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             try self.checkIfVertexExists(id);
 
             // We don't need to release the memory here since the caller will do it.
-            var adjacents: AutoArrayHashMapUnmanaged(HypergraphZId, ArrayListUnmanaged(HypergraphZId)) = .empty;
+            var adjacents: AutoArrayHashMap(HypergraphZId, ArrayList(HypergraphZId)) = .empty;
             const vertex = self.vertices.get(id).?;
             for (vertex.relations.items) |hyperedge_id| {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
@@ -1158,7 +1158,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             try self.checkIfVertexExists(id);
 
             // We don't need to release the memory here since the caller will do it.
-            var adjacents: AutoArrayHashMapUnmanaged(HypergraphZId, ArrayListUnmanaged(HypergraphZId)) = .empty;
+            var adjacents: AutoArrayHashMap(HypergraphZId, ArrayList(HypergraphZId)) = .empty;
             const vertex = self.vertices.get(id).?;
             for (vertex.relations.items) |hyperedge_id| {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
@@ -1197,15 +1197,15 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             }
 
             // We don't need to release the memory here since the caller will do it.
-            var intersections: ArrayListUnmanaged(HypergraphZId) = .empty;
-            var matches: AutoArrayHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            var intersections: ArrayList(HypergraphZId) = .empty;
+            var matches: AutoArrayHashMap(HypergraphZId, usize) = .empty;
             defer matches.deinit(self.allocator);
 
             for (hyperedges_ids) |id| {
                 const hyperedge = self.hyperedges.getPtr(id).?;
 
                 // Keep track of visited vertices since the same vertex can appear multiple times within a hyperedge.
-                var visited: AutoArrayHashMapUnmanaged(HypergraphZId, void) = .empty;
+                var visited: AutoArrayHashMap(HypergraphZId, void) = .empty;
                 defer visited.deinit(self.allocator);
 
                 for (hyperedge.relations.items) |v| {
@@ -1234,7 +1234,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// hyperedge ids.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const HyperedgesResult = struct {
-            data: AutoArrayHashMapUnmanaged(HypergraphZId, void),
+            data: AutoArrayHashMap(HypergraphZId, void),
 
             pub fn deinit(self: *HyperedgesResult, allocator: Allocator) void {
                 self.data.deinit(allocator);
@@ -1251,7 +1251,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
 
             const eq = first_vertex_id == second_vertex_id;
             const first_vertex = self.vertices.get(first_vertex_id).?;
-            var deduped: AutoArrayHashMapUnmanaged(HypergraphZId, void) = .empty;
+            var deduped: AutoArrayHashMap(HypergraphZId, void) = .empty;
             for (first_vertex.relations.items) |hyperedge_id| {
                 const hyperedge = self.hyperedges.get(hyperedge_id).?;
                 var found_occurences: usize = 0;
@@ -1321,7 +1321,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Get the orphan hyperedges.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub fn getOrphanHyperedges(self: *Self) HypergraphZError![]const HypergraphZId {
-            var orphans: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var orphans: ArrayList(HypergraphZId) = .empty;
             var it = self.hyperedges.iterator();
             while (it.next()) |*kv| {
                 const vertices = kv.value_ptr.relations;
@@ -1339,7 +1339,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// The caller is responsible for freeing the memory with `deinit`.
         pub fn getOrphanVertices(self: *Self) HypergraphZError![]const HypergraphZId {
             if (!self.is_built) return HypergraphZError.NotBuilt;
-            var orphans: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var orphans: ArrayList(HypergraphZId) = .empty;
             var it = self.vertices.iterator();
             while (it.next()) |*kv| {
                 const hyperedges = kv.value_ptr.relations;
@@ -1372,7 +1372,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Struct containing the shortest path as a list of vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const ShortestPathResult = struct {
-            data: ?ArrayListUnmanaged(HypergraphZId),
+            data: ?ArrayList(HypergraphZId),
 
             pub fn deinit(self: *ShortestPathResult, allocator: Allocator) void {
                 if (self.data) |*d| d.deinit(allocator);
@@ -1437,7 +1437,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             }
 
             // Reconstruct path by walking came_from backward from `to`.
-            var path: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var path: ArrayList(HypergraphZId) = .empty;
             try path.append(self.allocator, to);
             var cursor = to;
             while (came_from.get(cursor)) |entry| {
@@ -1466,8 +1466,8 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             const arena_allocator = arena.allocator();
 
             var visited: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
-            var queue: ArrayListUnmanaged(HypergraphZId) = .empty;
-            var result: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var queue: ArrayList(HypergraphZId) = .empty;
+            var result: ArrayList(HypergraphZId) = .empty;
             var head: usize = 0;
 
             try visited.put(arena_allocator, start, {});
@@ -1510,9 +1510,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             const arena_allocator = arena.allocator();
 
             var visited: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
-            var stack: ArrayListUnmanaged(HypergraphZId) = .empty;
-            var neighbors: ArrayListUnmanaged(HypergraphZId) = .empty;
-            var result: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var stack: ArrayList(HypergraphZId) = .empty;
+            var neighbors: ArrayList(HypergraphZId) = .empty;
+            var result: ArrayList(HypergraphZId) = .empty;
 
             try stack.append(arena_allocator, start);
 
@@ -1549,7 +1549,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Struct containing all simple paths between two vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const AllPathsResult = struct {
-            data: ArrayListUnmanaged([]const HypergraphZId),
+            data: ArrayList([]const HypergraphZId),
 
             pub fn deinit(self: *AllPathsResult, allocator: Allocator) void {
                 for (self.data.items) |path| allocator.free(path);
@@ -1575,13 +1575,13 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
 
             const StackEntry = struct {
                 vertex: HypergraphZId,
-                path: ArrayListUnmanaged(HypergraphZId),
+                path: ArrayList(HypergraphZId),
             };
 
-            var stack: ArrayListUnmanaged(StackEntry) = .empty;
+            var stack: ArrayList(StackEntry) = .empty;
             var seen_neighbors: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
 
-            var initial_path: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var initial_path: ArrayList(HypergraphZId) = .empty;
             try initial_path.append(arena_allocator, from);
             try stack.append(arena_allocator, .{ .vertex = from, .path = initial_path });
 
@@ -1638,7 +1638,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             const arena_allocator = arena.allocator();
 
             var visited: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
-            var queue: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var queue: ArrayList(HypergraphZId) = .empty;
             var head: usize = 0;
 
             try visited.put(arena_allocator, from, {});
@@ -1707,7 +1707,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             }
 
             var visited: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
-            var queue: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var queue: ArrayList(HypergraphZId) = .empty;
 
             // For each source vertex, BFS from its direct successors to find
             // all vertices reachable in >= 1 hop (strict transitive closure).
@@ -1790,7 +1790,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 betweenness: f64,
             };
 
-            data: AutoArrayHashMapUnmanaged(HypergraphZId, Scores),
+            data: AutoArrayHashMap(HypergraphZId, Scores),
 
             pub fn deinit(self: *CentralityResult, allocator: Allocator) void {
                 self.data.deinit(allocator);
@@ -1848,9 +1848,9 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             var sigma: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
             var dist: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
             var delta: AutoHashMapUnmanaged(HypergraphZId, f64) = .empty;
-            var pred: AutoHashMapUnmanaged(HypergraphZId, ArrayListUnmanaged(HypergraphZId)) = .empty;
-            var bfs_stack: ArrayListUnmanaged(HypergraphZId) = .empty;
-            var queue: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var pred: AutoHashMapUnmanaged(HypergraphZId, ArrayList(HypergraphZId)) = .empty;
+            var bfs_stack: ArrayList(HypergraphZId) = .empty;
+            var queue: ArrayList(HypergraphZId) = .empty;
 
             var src_it = self.vertices.iterator();
             while (src_it.next()) |kv| {
@@ -1964,7 +1964,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             const StackEntry = struct { vertex: HypergraphZId, is_exit: bool };
 
             var state: AutoHashMapUnmanaged(HypergraphZId, VertexState) = .empty;
-            var stack: ArrayListUnmanaged(StackEntry) = .empty;
+            var stack: ArrayList(StackEntry) = .empty;
 
             var v_it = self.vertices.iterator();
             while (v_it.next()) |kv| {
@@ -2042,7 +2042,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             }
 
             // Seed the queue with all zero-in-degree vertices (in insertion order).
-            var queue: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var queue: ArrayList(HypergraphZId) = .empty;
             var id_it = self.vertices.iterator();
             while (id_it.next()) |kv| {
                 if (in_degree.get(kv.key_ptr.*).? == 0) {
@@ -2050,7 +2050,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 }
             }
 
-            var result: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var result: ArrayList(HypergraphZId) = .empty;
             errdefer result.deinit(self.allocator);
             var head: usize = 0;
 
@@ -2097,7 +2097,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             const arena_allocator = arena.allocator();
 
             var visited: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
-            var queue: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var queue: ArrayList(HypergraphZId) = .empty;
             var head: usize = 0;
 
             var v_it = self.vertices.iterator();
@@ -2130,7 +2130,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
         /// Struct containing all weakly-connected components as slices of vertex IDs.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const ConnectedComponentsResult = struct {
-            data: ArrayListUnmanaged([]const HypergraphZId),
+            data: ArrayList([]const HypergraphZId),
 
             pub fn deinit(self: *ConnectedComponentsResult, allocator: Allocator) void {
                 for (self.data.items) |component| allocator.free(component);
@@ -2152,7 +2152,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
 
             var result: ConnectedComponentsResult = .{ .data = .empty };
             var visited: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
-            var queue: ArrayListUnmanaged(HypergraphZId) = .empty;
+            var queue: ArrayList(HypergraphZId) = .empty;
 
             var v_it = self.vertices.iterator();
             while (v_it.next()) |kv| {
@@ -2162,7 +2162,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 // BFS from seed (undirected) to collect one component.
                 queue.clearRetainingCapacity();
                 var head: usize = 0;
-                var component: ArrayListUnmanaged(HypergraphZId) = .empty;
+                var component: ArrayList(HypergraphZId) = .empty;
 
                 try visited.put(arena_allocator, seed, {});
                 try queue.append(arena_allocator, seed);
@@ -2283,7 +2283,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                     kv.value_ptr.relations.items,
                 );
                 try skeleton.hyperedges.put(self.allocator, kv.key_ptr.*, .{
-                    .relations = ArrayListUnmanaged(HypergraphZId).fromOwnedSlice(owned),
+                    .relations = ArrayList(HypergraphZId).fromOwnedSlice(owned),
                     .data = kv.value_ptr.data,
                 });
                 skeleton.id_counter = @max(skeleton.id_counter, kv.key_ptr.*);
@@ -2341,7 +2341,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 if (!all_in_set) continue;
                 const owned = try self.allocator.dupe(HypergraphZId, relations);
                 try sub.hyperedges.put(self.allocator, kv.key_ptr.*, .{
-                    .relations = ArrayListUnmanaged(HypergraphZId).fromOwnedSlice(owned),
+                    .relations = ArrayList(HypergraphZId).fromOwnedSlice(owned),
                     .data = kv.value_ptr.data,
                 });
                 sub.id_counter = @max(sub.id_counter, kv.key_ptr.*);
@@ -2400,7 +2400,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 const kv = self.hyperedges.getEntry(hid).?;
                 const owned = try self.allocator.dupe(HypergraphZId, kv.value_ptr.relations.items);
                 try sub.hyperedges.put(self.allocator, hid, .{
-                    .relations = ArrayListUnmanaged(HypergraphZId).fromOwnedSlice(owned),
+                    .relations = ArrayList(HypergraphZId).fromOwnedSlice(owned),
                     .data = kv.value_ptr.data,
                 });
                 sub.id_counter = @max(sub.id_counter, hid);
@@ -2622,7 +2622,7 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
                 const new_data = try graph.hyperedges_pool.create(allocator);
                 new_data.* = data;
                 const vtx_count = try reader.takeInt(u32, .little);
-                var vtx_list: ArrayListUnmanaged(HypergraphZId) = .empty;
+                var vtx_list: ArrayList(HypergraphZId) = .empty;
                 try vtx_list.ensureTotalCapacity(allocator, vtx_count);
                 for (0..vtx_count) |_| {
                     const vid = try reader.takeInt(u32, .little);

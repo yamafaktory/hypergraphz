@@ -4,7 +4,7 @@ const std = @import("std");
 const hypergraphz = @import("hypergraphz.zig");
 
 const Allocator = std.mem.Allocator;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayList;
 const GeneralPurposeAllocator = std.heap.DebugAllocator;
 const HypergraphZ = hypergraphz.HypergraphZ;
 const HypergraphZId = hypergraphz.HypergraphZId;
@@ -85,7 +85,7 @@ pub fn main() !void {
 
     // Bench 2: batch insertions (build phase only, no reverse index overhead).
     {
-        var vertices: ArrayListUnmanaged(HypergraphZId) = try .initCapacity(allocator, 1_000);
+        var vertices: ArrayList(HypergraphZId) = try .initCapacity(allocator, 1_000);
         defer vertices.deinit(allocator);
         var bench: Bench = try .init(
             allocator,

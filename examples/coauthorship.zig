@@ -138,7 +138,7 @@ pub fn main() !void {
     defer centrality.deinit(allocator);
 
     const ScoreEntry = struct { vid: HypergraphZId, score: f64 };
-    var scores: std.ArrayListUnmanaged(ScoreEntry) = .empty;
+    var scores: std.ArrayList(ScoreEntry) = .empty;
     defer scores.deinit(allocator);
     for (g.getAllVertices()) |vid| {
         try scores.append(allocator, .{ .vid = vid, .score = centrality.data.get(vid).?.betweenness });

@@ -1,7 +1,7 @@
 const std = @import("std");
 const h = @import("helpers.zig");
 
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayList;
 const HypergraphZId = h.HypergraphZId;
 const HypergraphZError = h.HypergraphZError;
 const expect = h.expect;
@@ -89,7 +89,7 @@ test "append vertices to hyperedge" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr: ArrayListUnmanaged(HypergraphZId) = .empty;
+    var arr: ArrayList(HypergraphZId) = .empty;
     defer arr.deinit(std.testing.allocator);
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -124,7 +124,7 @@ test "prepend vertices to hyperedge" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr: ArrayListUnmanaged(HypergraphZId) = .empty;
+    var arr: ArrayList(HypergraphZId) = .empty;
     defer arr.deinit(std.testing.allocator);
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -159,7 +159,7 @@ test "insert vertices into hyperedge" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr: ArrayListUnmanaged(HypergraphZId) = .empty;
+    var arr: ArrayList(HypergraphZId) = .empty;
     defer arr.deinit(std.testing.allocator);
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -222,7 +222,7 @@ test "delete vertex by index from hyperedge" {
     // Create 10 vertices and store their ids.
     // Last two vertices are duplicated.
     const nb_vertices = 10;
-    var arr: ArrayListUnmanaged(HypergraphZId) = .empty;
+    var arr: ArrayList(HypergraphZId) = .empty;
     defer arr.deinit(std.testing.allocator);
     for (0..nb_vertices, 0..) |_, i| {
         if (i == nb_vertices - 1) {
@@ -267,7 +267,7 @@ test "delete hyperedge only" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr: ArrayListUnmanaged(HypergraphZId) = .empty;
+    var arr: ArrayList(HypergraphZId) = .empty;
     defer arr.deinit(std.testing.allocator);
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
@@ -297,7 +297,7 @@ test "delete hyperedge and vertices" {
 
     // Create 10 vertices and store their ids.
     const nb_vertices = 10;
-    var arr: ArrayListUnmanaged(HypergraphZId) = .empty;
+    var arr: ArrayList(HypergraphZId) = .empty;
     defer arr.deinit(std.testing.allocator);
     for (0..nb_vertices) |_| {
         const id = try graph.createVertex(.{});
