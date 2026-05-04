@@ -2231,6 +2231,222 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             return result;
         }
 
+        /// One strict-subset relation between two hyperedges.
+        ///
+        /// `subset` is a hyperedge whose distinct vertex set is a strict
+        /// subset of `superset`'s. "Strict" means `|distinct(subset)| <
+        /// |distinct(superset)|`; identical sets are not reported.
+        pub const InclusionRelation = struct {
+            subset: HypergraphZId,
+            superset: HypergraphZId,
+        };
+
+        /// Result of `getInclusions`. The caller is responsible for freeing
+        /// the memory with `deinit`.
+        pub const InclusionResult = struct {
+            data: []InclusionRelation,
+
+            pub fn deinit(self: *InclusionResult, allocator: Allocator) void {
+                allocator.free(self.data);
+                self.* = undefined;
+            }
+        };
+
+        /// Find every pair of hyperedges `(small, large)` whose distinct vertex
+        /// sets satisfy `distinct(small) ⊊ distinct(large)`.
+        ///
+        /// "Nestedness" — the prevalence of subset relations among hyperedges
+        /// — is a recognized structural property of higher-order networks (see
+        /// e.g. Mariani et al., "Nestedness in complex networks", Phys. Rep.
+        /// 813, 2019; LaRock & Lambiotte, "Encapsulation structure and
+        /// dynamics in hypergraphs", J. Phys. Complex. 4, 2023). It surfaces
+        /// in ecological niches, legislative co-sponsorship, and ER drug
+        /// combinations among other settings.
+        ///
+        /// Vertex multiplicity is collapsed to 0/1 before comparison, matching
+        /// the convention used by `toIncidenceMatrix` and friends. Hyperedges
+        /// with empty distinct sets are not considered (`∅ ⊆ X` is true for
+        /// every `X` but is degenerate; including it would explode the output
+        /// for orphan hyperedges).
+        ///
+        /// Algorithm: walk every vertex's incidence list and accumulate the
+        /// pairwise intersection size `|distinct(a) ∩ distinct(b)|` into a
+        /// hashmap keyed by the unordered pair (packed as a `u64`). For each
+        /// recorded pair, `a ⊊ b` iff `|a ∩ b| = |a|` and `|a| < |b|`.
+        ///
+        /// Complexity: `O(Σ_v deg(v)²)` for the intersection accumulation,
+        /// plus `O(P)` for the emit pass where `P` is the number of pairs of
+        /// hyperedges sharing at least one vertex.
+        ///
+        /// The caller is responsible for freeing the result with `deinit`.
+        pub fn getInclusions(self: *Self) HypergraphZError!InclusionResult {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+
+            // Distinct-vertex count per hyperedge.
+            var sizes: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            try sizes.ensureTotalCapacity(aa, @intCast(self.hyperedges.count()));
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
+                seen.clearRetainingCapacity();
+                var count: usize = 0;
+                for (kv.value_ptr.relations.items) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (!gop.found_existing) count += 1;
+                }
+                sizes.putAssumeCapacity(kv.key_ptr.*, count);
+            }
+
+            // Pairwise intersection sizes via shared vertices. Each vertex's
+            // incidence list is dedup'd by build(), so it lists each
+            // containing hyperedge exactly once.
+            var shared: AutoHashMapUnmanaged(u64, usize) = .empty;
+            var v_it = self.vertices.iterator();
+            while (v_it.next()) |kv| {
+                const incident = kv.value_ptr.relations.items;
+                for (incident, 0..) |a, i| {
+                    for (incident[i + 1 ..]) |b| {
+                        if (a == b) continue;
+                        const lo: u64 = @min(a, b);
+                        const hi: u64 = @max(a, b);
+                        const key = (lo << 32) | hi;
+                        const gop = try shared.getOrPut(aa, key);
+                        if (gop.found_existing) {
+                            gop.value_ptr.* += 1;
+                        } else {
+                            gop.value_ptr.* = 1;
+                        }
+                    }
+                }
+            }
+
+            // Emit strict-subset pairs.
+            var out: ArrayList(InclusionRelation) = .empty;
+            var s_it = shared.iterator();
+            while (s_it.next()) |kv| {
+                const key = kv.key_ptr.*;
+                const a: HypergraphZId = @intCast(key >> 32);
+                const b: HypergraphZId = @intCast(key & 0xFFFFFFFF);
+                const inter = kv.value_ptr.*;
+                const size_a = sizes.get(a).?;
+                const size_b = sizes.get(b).?;
+                if (inter == size_a and size_a < size_b) {
+                    try out.append(self.allocator, .{ .subset = a, .superset = b });
+                } else if (inter == size_b and size_b < size_a) {
+                    try out.append(self.allocator, .{ .subset = b, .superset = a });
+                }
+            }
+
+            const owned = try out.toOwnedSlice(self.allocator);
+            debugAt(@src(), "{} inclusion pairs", .{owned.len});
+            return .{ .data = owned };
+        }
+
+        /// Per-order nestedness profile, sorted ascending by `size`.
+        ///
+        /// Each `Entry` reports, for hyperedges of one distinct size `d`:
+        ///   - `total`: how many hyperedges have exactly `d` distinct vertices,
+        ///   - `included`: how many of those are a strict subset of at least
+        ///                 one larger hyperedge.
+        ///
+        /// Hyperedges with `size = 0` are skipped (see `getInclusions` for the
+        /// rationale). Hyperedge sizes with no hyperedges are simply absent
+        /// from the slice — there is no zero-padding.
+        pub const NestednessProfile = struct {
+            pub const Entry = struct {
+                size: usize,
+                included: usize,
+                total: usize,
+            };
+            data: []Entry,
+
+            pub fn deinit(self: *NestednessProfile, allocator: Allocator) void {
+                allocator.free(self.data);
+                self.* = undefined;
+            }
+        };
+
+        /// Aggregate nestedness counts per distinct hyperedge size — the
+        /// hypergraph analogue of the inclusion histogram in Hood, De Bacco
+        /// & Schein, "Broad spectrum structure discovery in large-scale
+        /// higher-order networks", Nat. Commun. 2026 (Fig. 5b). Use this to
+        /// see at which orders subset structure concentrates.
+        ///
+        /// Internally calls `getInclusions`. The caller is responsible for
+        /// freeing the result with `deinit`.
+        pub fn getNestednessProfile(self: *Self) HypergraphZError!NestednessProfile {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+
+            // Distinct-size of each hyperedge (recomputed locally — small,
+            // and avoids leaking it from `getInclusions`).
+            var sizes: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            try sizes.ensureTotalCapacity(aa, @intCast(self.hyperedges.count()));
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
+                seen.clearRetainingCapacity();
+                var count: usize = 0;
+                for (kv.value_ptr.relations.items) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (!gop.found_existing) count += 1;
+                }
+                sizes.putAssumeCapacity(kv.key_ptr.*, count);
+            }
+
+            // Total hyperedge count per (non-zero) size.
+            var total_by_size: AutoHashMapUnmanaged(usize, usize) = .empty;
+            var sz_it = sizes.iterator();
+            while (sz_it.next()) |kv| {
+                if (kv.value_ptr.* == 0) continue;
+                const gop = try total_by_size.getOrPut(aa, kv.value_ptr.*);
+                if (gop.found_existing) gop.value_ptr.* += 1 else gop.value_ptr.* = 1;
+            }
+
+            // Distinct-by-id "is subset of something" set.
+            var inclusions = try self.getInclusions();
+            defer inclusions.deinit(self.allocator);
+
+            var subset_set: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            for (inclusions.data) |rel| try subset_set.put(aa, rel.subset, {});
+
+            var included_by_size: AutoHashMapUnmanaged(usize, usize) = .empty;
+            var sub_it = subset_set.keyIterator();
+            while (sub_it.next()) |kp| {
+                const sz = sizes.get(kp.*).?;
+                const gop = try included_by_size.getOrPut(aa, sz);
+                if (gop.found_existing) gop.value_ptr.* += 1 else gop.value_ptr.* = 1;
+            }
+
+            var entries: ArrayList(NestednessProfile.Entry) = .empty;
+            var t_it = total_by_size.iterator();
+            while (t_it.next()) |kv| {
+                const size = kv.key_ptr.*;
+                try entries.append(self.allocator, .{
+                    .size = size,
+                    .included = included_by_size.get(size) orelse 0,
+                    .total = kv.value_ptr.*,
+                });
+            }
+
+            const owned = try entries.toOwnedSlice(self.allocator);
+            std.mem.sort(NestednessProfile.Entry, owned, {}, struct {
+                fn lt(_: void, x: NestednessProfile.Entry, y: NestednessProfile.Entry) bool {
+                    return x.size < y.size;
+                }
+            }.lt);
+
+            debugAt(@src(), "{} distinct sizes", .{owned.len});
+            return .{ .data = owned };
+        }
+
         /// Return true if the hypergraph contains at least one directed cycle.
         pub fn hasCycle(self: *Self) HypergraphZError!bool {
             if (!self.is_built) return HypergraphZError.NotBuilt;

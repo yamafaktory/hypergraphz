@@ -379,7 +379,57 @@ pub fn main() !void {
         };
     }
     if (!peeled_any) try w.interface.print("(none)", .{});
-    try w.interface.print("\n", .{});
+    try w.interface.print("\n\n", .{});
+
+    // ── 16. Nestedness ────────────────────────────────────────────────────────
+    // Inclusion / nestedness asks whether one hyperedge's distinct vertex set
+    // is strictly contained in another's. Common in preprint→conference→
+    // journal authorship chains, ecological niches, and ER drug combinations
+    // (Hood, De Bacco & Schein, Nat. Commun. 2026, Fig. 5b). The co-authorship
+    // dataset above is flat — every paper has at least one author no other
+    // paper has — so we demonstrate on a small inline preprint-style chain.
+
+    try w.interface.print("Nestedness\n", .{});
+    var main_inc = try g.getInclusions();
+    defer main_inc.deinit(allocator);
+    try w.interface.print("  Co-authorship dataset: {} strict-subset pair(s)\n", .{main_inc.data.len});
+
+    {
+        var mini = try Graph.init(allocator, .{
+            .vertices_capacity = 4,
+            .hyperedges_capacity = 3,
+        });
+        defer mini.deinit();
+        const a = try mini.createVertexAssumeCapacity(.{ .name = "Aria" });
+        const b = try mini.createVertexAssumeCapacity(.{ .name = "Bo" });
+        const c = try mini.createVertexAssumeCapacity(.{ .name = "Cy" });
+        const d = try mini.createVertexAssumeCapacity(.{ .name = "Dee" });
+        const draft = try mini.createHyperedgeAssumeCapacity(.{ .title = "Draft", .year = 2024, .citations = 1 });
+        try mini.appendVerticesToHyperedge(draft, &.{ a, b });
+        const conf = try mini.createHyperedgeAssumeCapacity(.{ .title = "Conference", .year = 2025, .citations = 1 });
+        try mini.appendVerticesToHyperedge(conf, &.{ a, b, c });
+        const journal = try mini.createHyperedgeAssumeCapacity(.{ .title = "Journal", .year = 2026, .citations = 1 });
+        try mini.appendVerticesToHyperedge(journal, &.{ a, b, c, d });
+        try mini.build();
+
+        var inc = try mini.getInclusions();
+        defer inc.deinit(allocator);
+        try w.interface.print("  Synthetic chain (Draft ⊊ Conference ⊊ Journal): {} pair(s)\n", .{inc.data.len});
+        for (inc.data) |rel| {
+            const sub_t = (try mini.getHyperedge(rel.subset)).title;
+            const sup_t = (try mini.getHyperedge(rel.superset)).title;
+            try w.interface.print("    \"{s}\" ⊊ \"{s}\"\n", .{ sub_t, sup_t });
+        }
+
+        var prof = try mini.getNestednessProfile();
+        defer prof.deinit(allocator);
+        try w.interface.print("  Per-order profile:\n", .{});
+        for (prof.data) |entry| {
+            try w.interface.print("    size {}: {}/{} included\n", .{
+                entry.size, entry.included, entry.total,
+            });
+        }
+    }
 
     try w.interface.flush();
 }

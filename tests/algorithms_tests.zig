@@ -444,3 +444,235 @@ test "compute pagerank" {
         try expect(pr.iterations == 1);
     }
 }
+
+fn hasInclusion(slice: []const h.Graph.InclusionRelation, sub: HypergraphZId, sup: HypergraphZId) bool {
+    for (slice) |rel| {
+        if (rel.subset == sub and rel.superset == sup) return true;
+    }
+    return false;
+}
+
+test "get inclusions" {
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try expectError(HypergraphZError.NotBuilt, graph.getInclusions());
+    }
+
+    // Empty graph.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        var res = try graph.getInclusions();
+        defer res.deinit(std.testing.allocator);
+        try expect(res.data.len == 0);
+    }
+
+    // Disjoint hyperedges share no vertex → no inclusions.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v3, v4 });
+        try graph.build();
+
+        var res = try graph.getInclusions();
+        defer res.deinit(std.testing.allocator);
+        try expect(res.data.len == 0);
+    }
+
+    // Single strict inclusion: {v1, v2} ⊊ {v1, v2, v3}.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const small = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(small, &.{ v1, v2 });
+        const large = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(large, &.{ v1, v2, v3 });
+        try graph.build();
+
+        var res = try graph.getInclusions();
+        defer res.deinit(std.testing.allocator);
+        try expect(res.data.len == 1);
+        try expect(res.data[0].subset == small);
+        try expect(res.data[0].superset == large);
+    }
+
+    // Identical distinct sets are NOT strict subsets and must be skipped.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v1, v2 });
+        try graph.build();
+
+        var res = try graph.getInclusions();
+        defer res.deinit(std.testing.allocator);
+        try expect(res.data.len == 0);
+    }
+
+    // Transitive chain: {v1,v2} ⊊ {v1,v2,v3} ⊊ {v1,v2,v3,v4}. All three
+    // strict-subset pairs must be reported (the small ⊊ largest pair too).
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const a = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(a, &.{ v1, v2 });
+        const b = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(b, &.{ v1, v2, v3 });
+        const c = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(c, &.{ v1, v2, v3, v4 });
+        try graph.build();
+
+        var res = try graph.getInclusions();
+        defer res.deinit(std.testing.allocator);
+        try expect(res.data.len == 3);
+        try expect(hasInclusion(res.data, a, b));
+        try expect(hasInclusion(res.data, a, c));
+        try expect(hasInclusion(res.data, b, c));
+    }
+
+    // Multiplicity collapse: {v1, v1, v1} has distinct size 1, and is a
+    // subset of {v1, v2}.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const small = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(small, &.{ v1, v1, v1 });
+        const large = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(large, &.{ v1, v2 });
+        try graph.build();
+
+        var res = try graph.getInclusions();
+        defer res.deinit(std.testing.allocator);
+        try expect(res.data.len == 1);
+        try expect(res.data[0].subset == small);
+        try expect(res.data[0].superset == large);
+    }
+
+    // Partial overlap (not subset): {v1, v2} and {v2, v3} share v2 but
+    // neither is contained in the other.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v2, v3 });
+        try graph.build();
+
+        var res = try graph.getInclusions();
+        defer res.deinit(std.testing.allocator);
+        try expect(res.data.len == 0);
+    }
+}
+
+test "get nestedness profile" {
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try expectError(HypergraphZError.NotBuilt, graph.getNestednessProfile());
+    }
+
+    // Empty graph: empty profile.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        var prof = try graph.getNestednessProfile();
+        defer prof.deinit(std.testing.allocator);
+        try expect(prof.data.len == 0);
+    }
+
+    // Three sizes: 2, 3, 4. The size-2 and size-3 hyperedges are subsets of
+    // the size-4 one. Profile must report:
+    //   size=2 → included=1, total=1
+    //   size=3 → included=1, total=1
+    //   size=4 → included=0, total=1
+    // and entries must be sorted by size ascending.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const a = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(a, &.{ v1, v2 });
+        const b = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(b, &.{ v1, v2, v3 });
+        const c = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(c, &.{ v1, v2, v3, v4 });
+        try graph.build();
+
+        var prof = try graph.getNestednessProfile();
+        defer prof.deinit(std.testing.allocator);
+
+        try expect(prof.data.len == 3);
+        try expect(prof.data[0].size == 2);
+        try expect(prof.data[0].included == 1);
+        try expect(prof.data[0].total == 1);
+        try expect(prof.data[1].size == 3);
+        try expect(prof.data[1].included == 1);
+        try expect(prof.data[1].total == 1);
+        try expect(prof.data[2].size == 4);
+        try expect(prof.data[2].included == 0);
+        try expect(prof.data[2].total == 1);
+    }
+
+    // A subset hyperedge that participates in two inclusion pairs is still
+    // counted once in `included`. e1 = {v1, v2} sits inside both e2 = {v1, v2, v3}
+    // and e3 = {v1, v2, v4}. Both inclusions exist, but for size=2 the
+    // included count is 1 (e1), not 2.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v1, v2, v3 });
+        const e3 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e3, &.{ v1, v2, v4 });
+        try graph.build();
+
+        var prof = try graph.getNestednessProfile();
+        defer prof.deinit(std.testing.allocator);
+
+        try expect(prof.data.len == 2);
+        try expect(prof.data[0].size == 2);
+        try expect(prof.data[0].included == 1);
+        try expect(prof.data[0].total == 1);
+        try expect(prof.data[1].size == 3);
+        try expect(prof.data[1].included == 0);
+        try expect(prof.data[1].total == 2);
+    }
+}
