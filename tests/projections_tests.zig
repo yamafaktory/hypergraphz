@@ -413,3 +413,263 @@ test "incidence matrix COO" {
     try expect(ones == m.entries.len);
     for (m.entries) |e| try expect(dense.at(e.row, e.col) == 1);
 }
+
+// Floating-point comparisons in Laplacian tests use this absolute tolerance.
+// The arithmetic involved is short (one outer product per hyperedge plus a
+// single sqrt for the normalized variant), so 1e-9 is comfortably loose
+// while still catching real bugs.
+const laplacian_eps: f64 = 1e-9;
+
+fn approxEq(a: f64, b: f64) bool {
+    return @abs(a - b) <= laplacian_eps;
+}
+
+test "laplacian unnormalized" {
+    // Empty graph: 0x0 matrix.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+        defer l.deinit(std.testing.allocator);
+        try expect(l.n == 0);
+        try expect(l.data.len == 0);
+    }
+
+    // Single isolated vertex: 1x1 zero matrix.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try graph.createVertexAssumeCapacity(.{});
+        try graph.build();
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+        defer l.deinit(std.testing.allocator);
+        try expect(l.n == 1);
+        try expect(approxEq(l.at(0, 0), 0.0));
+    }
+
+    // Dyad: two vertices in a single hyperedge of weight 1.
+    // δ=2, w=1 → S = (1/2) J₂; D_v = I; L = D_v − S = [[0.5, -0.5], [-0.5, 0.5]].
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2 });
+        try graph.build();
+
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+        defer l.deinit(std.testing.allocator);
+
+        try expect(l.n == 2);
+        try expect(approxEq(l.at(0, 0), 0.5));
+        try expect(approxEq(l.at(0, 1), -0.5));
+        try expect(approxEq(l.at(1, 0), -0.5));
+        try expect(approxEq(l.at(1, 1), 0.5));
+    }
+
+    // Triad: three vertices in a single hyperedge of weight 1.
+    // δ=3, w=1 → S = (1/3) J₃; D_v = I; L = I − (1/3) J₃.
+    // Diagonal = 1 − 1/3 = 2/3; off-diagonal = −1/3.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2, v3 });
+        try graph.build();
+
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+        defer l.deinit(std.testing.allocator);
+
+        try expect(l.n == 3);
+        for (0..3) |i| {
+            for (0..3) |j| {
+                const expected: f64 = if (i == j) 2.0 / 3.0 else -1.0 / 3.0;
+                try expect(approxEq(l.at(i, j), expected));
+            }
+        }
+    }
+
+    // Properties on the full test graph: symmetry and zero row sums.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try h.generateTestData(&graph);
+
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+        defer l.deinit(std.testing.allocator);
+
+        try expect(l.n == 5);
+        for (0..5) |i| {
+            var row_sum: f64 = 0;
+            for (0..5) |j| {
+                row_sum += l.at(i, j);
+                try expect(approxEq(l.at(i, j), l.at(j, i))); // symmetry
+            }
+            try expect(approxEq(row_sum, 0.0)); // unnormalized rows sum to 0
+        }
+    }
+}
+
+test "laplacian normalized zhou" {
+    // Empty graph.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .normalized_zhou });
+        defer l.deinit(std.testing.allocator);
+        try expect(l.n == 0);
+    }
+
+    // Isolated vertex: identity row (degree 0 → diagonal stays at 1, rest zero).
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try graph.createVertexAssumeCapacity(.{});
+        try graph.build();
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .normalized_zhou });
+        defer l.deinit(std.testing.allocator);
+        try expect(approxEq(l.at(0, 0), 1.0));
+    }
+
+    // Dyad: with D_v = I the normalized form coincides with the unnormalized
+    // result on the same graph.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2 });
+        try graph.build();
+
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .normalized_zhou });
+        defer l.deinit(std.testing.allocator);
+
+        try expect(approxEq(l.at(0, 0), 0.5));
+        try expect(approxEq(l.at(0, 1), -0.5));
+        try expect(approxEq(l.at(1, 0), -0.5));
+        try expect(approxEq(l.at(1, 1), 0.5));
+    }
+
+    // Two disjoint hyperedges sharing no vertices: the Laplacian is
+    // block-diagonal. v1—v2 in e1 (weight 1); v3—v4 in e2 (weight 1).
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v3, v4 });
+        try graph.build();
+
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .normalized_zhou });
+        defer l.deinit(std.testing.allocator);
+
+        // Off-block entries must all be zero (no connection across blocks).
+        try expect(approxEq(l.at(0, 2), 0.0));
+        try expect(approxEq(l.at(0, 3), 0.0));
+        try expect(approxEq(l.at(1, 2), 0.0));
+        try expect(approxEq(l.at(1, 3), 0.0));
+        try expect(approxEq(l.at(2, 0), 0.0));
+        try expect(approxEq(l.at(3, 0), 0.0));
+
+        // Each block is the dyad Laplacian.
+        try expect(approxEq(l.at(0, 1), -0.5));
+        try expect(approxEq(l.at(2, 3), -0.5));
+    }
+
+    // Symmetry on the full test graph. Eigenvalues of Zhou's normalized
+    // Laplacian lie in [0, 2]; we don't run an eigensolver here, but a
+    // necessary condition is `0 ≤ L[i,i] ≤ 2`.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try h.generateTestData(&graph);
+
+        var l = try graph.toLaplacian(std.testing.allocator, .{ .variant = .normalized_zhou });
+        defer l.deinit(std.testing.allocator);
+
+        for (0..5) |i| {
+            try expect(l.at(i, i) >= -laplacian_eps);
+            try expect(l.at(i, i) <= 2.0 + laplacian_eps);
+            for (0..5) |j| {
+                try expect(approxEq(l.at(i, j), l.at(j, i)));
+            }
+        }
+    }
+}
+
+test "laplacian respects hyperedge weight" {
+    // Doubling a hyperedge's weight doubles its contribution to the unnormalized
+    // Laplacian (which is linear in W). Compared against the same graph with
+    // weight 1 we should see exact factor-of-two scaling on every entry.
+    var g1 = try h.scaffold();
+    defer g1.deinit();
+    var g2 = try h.scaffold();
+    defer g2.deinit();
+
+    inline for (.{ &g1, &g2 }, .{ 1, 2 }) |g, w| {
+        const v1 = try g.createVertexAssumeCapacity(.{});
+        const v2 = try g.createVertexAssumeCapacity(.{});
+        const v3 = try g.createVertexAssumeCapacity(.{});
+        const e = try g.createHyperedgeAssumeCapacity(.{ .weight = w });
+        try g.appendVerticesToHyperedge(e, &.{ v1, v2, v3 });
+        try g.build();
+    }
+
+    var l1 = try g1.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+    defer l1.deinit(std.testing.allocator);
+    var l2 = try g2.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+    defer l2.deinit(std.testing.allocator);
+
+    try expect(l1.n == 3 and l2.n == 3);
+    for (0..3) |i| {
+        for (0..3) |j| {
+            try expect(approxEq(2.0 * l1.at(i, j), l2.at(i, j)));
+        }
+    }
+}
+
+test "laplacian collapses vertex multiplicity" {
+    // A hyperedge that lists the same vertex multiple times must contribute
+    // exactly as if that vertex appeared once. Compare {v1, v2, v2, v2} to
+    // {v1, v2}: the resulting Laplacians must be identical.
+    var g_dup = try h.scaffold();
+    defer g_dup.deinit();
+    {
+        const v1 = try g_dup.createVertexAssumeCapacity(.{});
+        const v2 = try g_dup.createVertexAssumeCapacity(.{});
+        const e = try g_dup.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try g_dup.appendVerticesToHyperedge(e, &.{ v1, v2, v2, v2 });
+        try g_dup.build();
+    }
+
+    var g_unique = try h.scaffold();
+    defer g_unique.deinit();
+    {
+        const v1 = try g_unique.createVertexAssumeCapacity(.{});
+        const v2 = try g_unique.createVertexAssumeCapacity(.{});
+        const e = try g_unique.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try g_unique.appendVerticesToHyperedge(e, &.{ v1, v2 });
+        try g_unique.build();
+    }
+
+    var l_dup = try g_dup.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+    defer l_dup.deinit(std.testing.allocator);
+    var l_unique = try g_unique.toLaplacian(std.testing.allocator, .{ .variant = .unnormalized });
+    defer l_unique.deinit(std.testing.allocator);
+
+    for (0..2) |i| {
+        for (0..2) |j| {
+            try expect(approxEq(l_dup.at(i, j), l_unique.at(i, j)));
+        }
+    }
+}

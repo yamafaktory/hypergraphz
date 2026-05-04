@@ -239,9 +239,40 @@ pub fn main() !void {
     defer expanded.deinit();
     try expanded.build();
     try w.interface.print(
-        "  {} papers → {} directed co-author pairs\n",
+        "  {} papers → {} directed co-author pairs\n\n",
         .{ g.countHyperedges(), expanded.countHyperedges() },
     );
+
+    // ── 10. Spectral view ─────────────────────────────────────────────────────
+    // The hypergraph Laplacian (Zhou et al. 2006; Feng et al. HGNN 2019) encodes
+    // connectivity in an n×n matrix. With two disjoint communities the result
+    // is block-diagonal: every cell linking a community-A researcher to a
+    // community-B researcher is exactly zero. See `toLaplacian` docs for the
+    // formula and references.
+
+    try w.interface.print("Spectral view (normalized Laplacian)\n", .{});
+    var lap = try g.toLaplacian(allocator, .{ .variant = .normalized_zhou });
+    defer lap.deinit(allocator);
+
+    // Header row: 2-letter prefix of each researcher's name, aligned over the columns.
+    try w.interface.print("                ", .{});
+    for (lap.vertex_ids) |vid| {
+        const name = (try g.getVertex(vid)).name;
+        try w.interface.print(" {s:>6}", .{name[0..@min(name.len, 2)]});
+    }
+    try w.interface.print("\n", .{});
+
+    for (lap.vertex_ids, 0..) |vid, i| {
+        const name = (try g.getVertex(vid)).name;
+        try w.interface.print("  {s:<14}", .{name});
+        for (0..lap.n) |j| {
+            // Normalize tiny values (incl. IEEE signed zero) to +0 for readability.
+            const v = lap.at(i, j);
+            const shown: f64 = if (@abs(v) < 1e-12) 0.0 else v;
+            try w.interface.print(" {d:6.2}", .{shown});
+        }
+        try w.interface.print("\n", .{});
+    }
 
     try w.interface.flush();
 }

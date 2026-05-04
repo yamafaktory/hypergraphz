@@ -2662,6 +2662,209 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             };
         }
 
+        /// Variants of the hypergraph Laplacian.
+        ///
+        /// References:
+        /// - Zhou, Huang & Schölkopf, "Learning with Hypergraphs: Clustering,
+        ///   Classification, and Embedding", NeurIPS 2006:
+        ///   https://papers.nips.cc/paper/2006/hash/dff8e9c2ac33381546d96deea9922999-Abstract.html
+        /// - Feng et al., "Hypergraph Neural Networks", AAAI 2019:
+        ///   https://arxiv.org/abs/1809.09401
+        pub const LaplacianVariant = enum {
+            /// Unnormalized hypergraph Laplacian:
+            ///   `L = D_v − H W D_e⁻¹ Hᵀ`
+            /// where `D_v` is the diagonal vertex-degree matrix
+            /// (`d(v) = Σ_{e ∋ v} w(e)`), `W` is the diagonal hyperedge-weight
+            /// matrix, and `D_e` is the diagonal hyperedge-cardinality matrix
+            /// (`δ(e) = |{v : v ∈ e}|`, multiplicity collapsed).
+            /// Symmetric and positive semi-definite; rows sum to 0.
+            unnormalized,
+
+            /// Symmetric normalized Laplacian (Zhou 2006). Default for spectral
+            /// hypergraph analysis and the form used by HGNN:
+            ///   `L = I − D_v⁻¹ᐟ² H W D_e⁻¹ Hᵀ D_v⁻¹ᐟ²`
+            /// Symmetric; eigenvalues lie in `[0, 2]`.
+            normalized_zhou,
+        };
+
+        /// Options for `toLaplacian`.
+        pub const LaplacianOptions = struct {
+            variant: LaplacianVariant = .normalized_zhou,
+        };
+
+        /// Dense `n × n` hypergraph Laplacian, with `n = countVertices()`.
+        /// Stored as row-major `f64`. Row/column index `i` maps to
+        /// `vertex_ids[i]` (the order returned by `getAllVertices()`).
+        ///
+        /// Hyperedges are treated as undirected vertex sets: vertex multiplicity
+        /// within a hyperedge is collapsed to 0/1, matching the textbook
+        /// `H ∈ {0,1}^{n×m}` convention used by `toIncidenceMatrix`. Hyperedge
+        /// direction (in the directed-hypergraph sense) is intentionally not
+        /// considered here, since the Laplacian is defined for the undirected
+        /// case in the standard literature.
+        ///
+        /// Hyperedge weights are read from the integer field named
+        /// `options.weight_field` on the hyperedge payload (the same field used
+        /// by `findShortestPath`) and cast to `f64`.
+        ///
+        /// The caller is responsible for freeing the memory with `deinit`.
+        pub const LaplacianMatrix = struct {
+            n: usize,
+            data: []f64,
+            vertex_ids: []HypergraphZId,
+            variant: LaplacianVariant,
+
+            pub fn at(self: *const LaplacianMatrix, row: usize, col: usize) f64 {
+                assert(row < self.n);
+                assert(col < self.n);
+                return self.data[row * self.n + col];
+            }
+
+            pub fn deinit(self: *LaplacianMatrix, allocator: Allocator) void {
+                allocator.free(self.data);
+                allocator.free(self.vertex_ids);
+                self.* = undefined;
+            }
+        };
+
+        /// Build the hypergraph Laplacian.
+        ///
+        /// Definitions, with `H` the `n × m` incidence matrix
+        /// (`H[v,e] = 1` iff `v ∈ e`, with multiplicity collapsed):
+        ///
+        /// - vertex degree:    `d(v) = Σ_{e ∋ v} w(e)`
+        /// - hyperedge size:   `δ(e) = |{v : v ∈ e}|`
+        /// - weight matrix:    `W   = diag(w(e_1), ..., w(e_m))`
+        /// - degree matrices:  `D_v = diag(d(v_1), ...)`, `D_e = diag(δ(e_1), ...)`
+        ///
+        /// Variants (see `LaplacianVariant`):
+        ///
+        /// - `.unnormalized`:    `L = D_v − H W D_e⁻¹ Hᵀ`
+        /// - `.normalized_zhou`: `L = I − D_v⁻¹ᐟ² H W D_e⁻¹ Hᵀ D_v⁻¹ᐟ²`
+        ///
+        /// Edge cases:
+        ///
+        /// - Empty hypergraph (no vertices): returns the trivial `0 × 0` matrix.
+        /// - Hyperedges with `δ(e) = 0` (orphans): skipped — they contribute no
+        ///   incidence rows to `H`, so the formulas remain well-defined.
+        /// - Isolated vertices (`d(v) = 0`) under `.normalized_zhou`: the row
+        ///   and column collapse to zero except for a `1` on the diagonal — the
+        ///   standard convention to avoid `1/√0` from `D_v⁻¹ᐟ²`.
+        ///
+        /// Implementation note: instead of forming `H` explicitly we accumulate
+        /// `S = H W D_e⁻¹ Hᵀ` block-by-block — each hyperedge contributes a
+        /// `δ(e) × δ(e)` outer product of its indicator scaled by `w(e) / δ(e)`.
+        ///
+        /// Complexity: `O(n²)` memory plus `O(Σ |e|² + n²)` time. For very large
+        /// or dense hypergraphs the dense `n × n` matrix can dominate; callers
+        /// who only need top eigenvectors may prefer to drive a sparse solver
+        /// from `toIncidenceMatrixCOO` directly.
+        pub fn toLaplacian(
+            self: *Self,
+            allocator: Allocator,
+            opts: LaplacianOptions,
+        ) HypergraphZError!LaplacianMatrix {
+            const n = self.vertices.count();
+
+            const data = try allocator.alloc(f64, n * n);
+            errdefer allocator.free(data);
+            @memset(data, 0);
+
+            const vertex_ids = try allocator.dupe(HypergraphZId, self.vertices.keys());
+            errdefer allocator.free(vertex_ids);
+
+            // Vertex id → row index lookup, plus a per-hyperedge dedup buffer.
+            // Both arena-scoped: only needed during this call.
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+
+            var vertex_index: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            try vertex_index.ensureTotalCapacity(aa, @intCast(n));
+            for (vertex_ids, 0..) |vid, idx| {
+                vertex_index.putAssumeCapacity(vid, idx);
+            }
+
+            // Vertex degrees `d(v) = Σ_{e ∋ v} w(e)` — accumulated alongside `S`.
+            const degrees = try aa.alloc(f64, n);
+            @memset(degrees, 0);
+
+            // Per-hyperedge dedup state, reused across iterations.
+            var distinct: ArrayList(usize) = .empty;
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+
+            // Single pass: accumulate `S = H W D_e⁻¹ Hᵀ` directly into `data`
+            // and the vertex degrees into `degrees`.
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
+                const w_int = @field(kv.value_ptr.data.*, options.weight_field);
+                const w: f64 = @floatFromInt(w_int);
+
+                distinct.clearRetainingCapacity();
+                seen.clearRetainingCapacity();
+                for (kv.value_ptr.relations.items) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (gop.found_existing) continue;
+                    try distinct.append(aa, vertex_index.get(vid).?);
+                }
+                const delta = distinct.items.len;
+                if (delta == 0) continue;
+
+                for (distinct.items) |i| degrees[i] += w;
+
+                // `1_e 1_eᵀ` outer product scaled by `w(e) / δ(e)`.
+                const block: f64 = w / @as(f64, @floatFromInt(delta));
+                for (distinct.items) |i| {
+                    for (distinct.items) |j| {
+                        data[i * n + j] += block;
+                    }
+                }
+            }
+
+            // Convert `S` → `L` according to variant.
+            switch (opts.variant) {
+                .unnormalized => {
+                    // L = D_v − S
+                    for (0..n) |i| {
+                        for (0..n) |j| {
+                            data[i * n + j] = -data[i * n + j];
+                        }
+                        data[i * n + i] += degrees[i];
+                    }
+                },
+                .normalized_zhou => {
+                    // L = I − D_v⁻¹ᐟ² S D_v⁻¹ᐟ²
+                    // For isolated vertex i (degrees[i] == 0) we set inv_sqrt[i] = 0,
+                    // which zeroes row/col i of the scaled S; the `+= 1` on the
+                    // diagonal then leaves an identity row, the standard convention.
+                    const inv_sqrt = try aa.alloc(f64, n);
+                    for (0..n) |i| {
+                        inv_sqrt[i] = if (degrees[i] > 0)
+                            1.0 / std.math.sqrt(degrees[i])
+                        else
+                            0.0;
+                    }
+                    for (0..n) |i| {
+                        const ai = inv_sqrt[i];
+                        for (0..n) |j| {
+                            const idx = i * n + j;
+                            data[idx] = -ai * data[idx] * inv_sqrt[j];
+                        }
+                        data[i * n + i] += 1.0;
+                    }
+                },
+            }
+
+            debugAt(@src(), "{}x{} Laplacian built ({s})", .{ n, n, @tagName(opts.variant) });
+
+            return .{
+                .n = n,
+                .data = data,
+                .vertex_ids = vertex_ids,
+                .variant = opts.variant,
+            };
+        }
+
         // ============================================================
         // Codec
         // ============================================================

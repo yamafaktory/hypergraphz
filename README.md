@@ -39,7 +39,7 @@ treated as the corresponding author, giving each hyperedge a natural direction.
 zig build example
 ```
 
-It walks through nine features of the library in sequence:
+It walks through ten features of the library in sequence:
 
 | Section                  | API                      | What it shows                                               |
 | ------------------------ | ------------------------ | ----------------------------------------------------------- |
@@ -51,6 +51,7 @@ It walks through nine features of the library in sequence:
 | Shared authorship        | `getIntersections`       | researchers present on every paper in a given set           |
 | Seniority ordering       | `topologicalSort`        | hierarchy implied by the authorship direction               |
 | Pairwise expansion       | `expandToGraph`          | 6 papers encode 11 directed pairs in a regular graph        |
+| Spectral view            | `toLaplacian`            | normalized Laplacian; block-diagonal under disjoint groups  |
 
 ## Documentation
 
