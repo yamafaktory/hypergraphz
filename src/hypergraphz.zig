@@ -1183,6 +1183,54 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             return .{ .data = adjacents };
         }
 
+        /// Return the (undirected) co-occurrence neighborhood of `vertex_id`:
+        /// every distinct vertex that shares at least one hyperedge with it.
+        /// `vertex_id` itself is excluded.
+        ///
+        /// This is the symmetric, hyperedge-aware counterpart to
+        /// `getVertexAdjacencyTo` / `getVertexAdjacencyFrom`, which only
+        /// follow consecutive `(a, b)` window pairs and so respect the
+        /// directed semantics. Use this when "neighbor" means "co-appears in
+        /// at least one hyperedge", regardless of position within it.
+        ///
+        /// The returned IDs are emitted in first-encounter order across the
+        /// vertex's incident hyperedges. Vertex multiplicity within any one
+        /// hyperedge is collapsed.
+        ///
+        /// Complexity: `O(Σ_{e ∋ v} |e|)`.
+        /// The caller is responsible for freeing the result with
+        /// `graph.allocator.free(result)`.
+        pub fn getVertexNeighborhood(self: *Self, vertex_id: HypergraphZId) HypergraphZError![]const HypergraphZId {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+            try self.checkIfVertexExists(vertex_id);
+
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            // Pre-mark `vertex_id` so we don't have to special-case it on
+            // every comparison inside the inner loop.
+            try seen.put(aa, vertex_id, {});
+
+            var out: ArrayList(HypergraphZId) = .empty;
+            errdefer out.deinit(self.allocator);
+
+            const vertex = self.vertices.get(vertex_id).?;
+            for (vertex.relations.items) |hid| {
+                const hyperedge = self.hyperedges.get(hid).?;
+                for (hyperedge.relations.items) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (gop.found_existing) continue;
+                    try out.append(self.allocator, vid);
+                }
+            }
+
+            const owned = try out.toOwnedSlice(self.allocator);
+            debugAt(@src(), "vertex {}: {} neighbors", .{ vertex_id, owned.len });
+            return owned;
+        }
+
         /// Get the intersections between multiple hyperedges.
         /// This method returns an owned slice which must be freed by the caller.
         pub fn getIntersections(self: *Self, hyperedges_ids: []const HypergraphZId) HypergraphZError![]const HypergraphZId {

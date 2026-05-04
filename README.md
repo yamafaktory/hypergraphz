@@ -39,7 +39,7 @@ treated as the corresponding author, giving each hyperedge a natural direction.
 zig build example
 ```
 
-It walks through sixteen features of the library in sequence:
+It walks through seventeen features of the library in sequence:
 
 | Section                  | API                      | What it shows                                                |
 | ------------------------ | ------------------------ | ------------------------------------------------------------ |
@@ -58,6 +58,7 @@ It walks through sixteen features of the library in sequence:
 | Line graph               | `getLineGraph`           | papers as vertices, linked when they share an author         |
 | K-core decomposition     | `getCore`                | (s, t)-core peeling; trims the lone-paper researcher         |
 | Nestedness               | `getInclusions`          | strict-subset pairs across hyperedges; sized profile         |
+| Co-author neighborhoods  | `getVertexNeighborhood`  | undirected co-occurrence neighbors across all hyperedges     |
 
 ## Documentation
 

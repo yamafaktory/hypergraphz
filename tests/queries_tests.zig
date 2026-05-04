@@ -499,3 +499,116 @@ test "get orphan vertices" {
     defer graph.allocator.free(orphans);
     try expectEqualSlices(HypergraphZId, &[_]HypergraphZId{orphan}, orphans);
 }
+
+fn contains(slice: []const HypergraphZId, id: HypergraphZId) bool {
+    for (slice) |x| {
+        if (x == id) return true;
+    }
+    return false;
+}
+
+test "get vertex neighborhood" {
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try expectError(HypergraphZError.NotBuilt, graph.getVertexNeighborhood(1));
+    }
+
+    // Unknown vertex.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        try expectError(HypergraphZError.VertexNotFound, graph.getVertexNeighborhood(max_id));
+    }
+
+    // Isolated vertex: empty neighborhood.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const lonely = try graph.createVertexAssumeCapacity(.{});
+        try graph.build();
+        const ns = try graph.getVertexNeighborhood(lonely);
+        defer graph.allocator.free(ns);
+        try expect(ns.len == 0);
+    }
+
+    // Single hyperedge {v1, v2, v3}: each vertex's neighborhood is the other two.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2, v3 });
+        try graph.build();
+
+        const ns = try graph.getVertexNeighborhood(v1);
+        defer graph.allocator.free(ns);
+        try expect(ns.len == 2);
+        try expect(contains(ns, v2));
+        try expect(contains(ns, v3));
+        try expect(!contains(ns, v1));
+    }
+
+    // Multiplicity collapse: {v1, v2, v2, v2} contributes v2 once.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2, v2, v2 });
+        try graph.build();
+
+        const ns = try graph.getVertexNeighborhood(v1);
+        defer graph.allocator.free(ns);
+        try expect(ns.len == 1);
+        try expect(ns[0] == v2);
+    }
+
+    // Multiple hyperedges: union across them. v1 is in {v1, v2} and {v1, v3, v4};
+    // its neighborhood is {v2, v3, v4}.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v1, v3, v4 });
+        try graph.build();
+
+        const ns = try graph.getVertexNeighborhood(v1);
+        defer graph.allocator.free(ns);
+        try expect(ns.len == 3);
+        try expect(contains(ns, v2));
+        try expect(contains(ns, v3));
+        try expect(contains(ns, v4));
+    }
+
+    // Symmetry: this is *not* the directional adjacency. A vertex appearing
+    // last in a hyperedge still neighbors the ones before it. v3 listed last
+    // in {v1, v2, v3} must still see v1 and v2 as neighbors.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2, v3 });
+        try graph.build();
+
+        const ns_v3 = try graph.getVertexNeighborhood(v3);
+        defer graph.allocator.free(ns_v3);
+        try expect(ns_v3.len == 2);
+        try expect(contains(ns_v3, v1));
+        try expect(contains(ns_v3, v2));
+    }
+}

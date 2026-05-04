@@ -430,6 +430,30 @@ pub fn main() !void {
             });
         }
     }
+    try w.interface.print("\n", .{});
+
+    // ── 17. Co-author neighborhoods ───────────────────────────────────────────
+    // getVertexNeighborhood returns the (undirected) set of vertices sharing
+    // at least one hyperedge with the given vertex — here, every researcher's
+    // direct collaborators across all their papers, regardless of author-list
+    // position. Distinct from getVertexAdjacencyTo / getVertexAdjacencyFrom,
+    // which follow the directed (corresponding-author → co-author) window pairs.
+
+    try w.interface.print("Co-author neighborhoods\n", .{});
+    for (g.getAllVertices()) |vid| {
+        const name = (try g.getVertex(vid)).name;
+        const ns = try g.getVertexNeighborhood(vid);
+        defer allocator.free(ns);
+        try w.interface.print("  {s:<16}", .{name});
+        for (ns, 0..) |nid, i| {
+            try w.interface.print("{s}{s}", .{
+                if (i == 0) "" else ", ",
+                (try g.getVertex(nid)).name,
+            });
+        }
+        if (ns.len == 0) try w.interface.print("(none)", .{});
+        try w.interface.print("\n", .{});
+    }
 
     try w.interface.flush();
 }
