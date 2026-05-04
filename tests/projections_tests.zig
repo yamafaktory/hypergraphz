@@ -815,3 +815,162 @@ test "line graph" {
         try expect(line.countHyperedges() == 0);
     }
 }
+
+test "core (s,t)" {
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try expectError(HypergraphZError.NotBuilt, graph.getCore(1, 1));
+    }
+
+    // Empty graph: empty core for any (s, t).
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        var core = try graph.getCore(2, 2);
+        defer core.deinit();
+        try expect(core.countVertices() == 0);
+        try expect(core.countHyperedges() == 0);
+    }
+
+    // (s=0, t=0): nothing peels, result is the full graph (with original IDs).
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const data = try h.generateTestData(&graph);
+
+        var core = try graph.getCore(0, 0);
+        defer core.deinit();
+        try expect(core.countVertices() == 5);
+        try expect(core.countHyperedges() == 3);
+        for ([_]HypergraphZId{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_e }) |vid| {
+            _ = try core.getVertex(vid);
+        }
+        for ([_]HypergraphZId{ data.h_a, data.h_b, data.h_c }) |hid| {
+            _ = try core.getHyperedge(hid);
+        }
+    }
+
+    // Degenerate threshold: nothing survives.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try h.generateTestData(&graph);
+        var core = try graph.getCore(999, 999);
+        defer core.deinit();
+        try expect(core.countVertices() == 0);
+        try expect(core.countHyperedges() == 0);
+    }
+
+    // Cascading peel on a path. v1—v2, v2—v3, v3—v4 with s=2:
+    // v1 has degree 1 → dies → {v1,v2} dies → v2 drops to 1 → dies → ... → empty.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v2, v3 });
+        const e3 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e3, &.{ v3, v4 });
+        try graph.build();
+
+        var core = try graph.getCore(2, 2);
+        defer core.deinit();
+        try expect(core.countVertices() == 0);
+        try expect(core.countHyperedges() == 0);
+    }
+
+    // Triangle of 2-edges: every vertex has degree 2. (s=2, t=2) survives intact;
+    // (s=3, t=2) peels everything.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        const e3 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v2, v3 });
+        try graph.appendVerticesToHyperedge(e3, &.{ v1, v3 });
+        try graph.build();
+
+        var k2 = try graph.getCore(2, 2);
+        defer k2.deinit();
+        try expect(k2.countVertices() == 3);
+        try expect(k2.countHyperedges() == 3);
+
+        var k3 = try graph.getCore(3, 2);
+        defer k3.deinit();
+        try expect(k3.countVertices() == 0);
+        try expect(k3.countHyperedges() == 0);
+    }
+
+    // Multiplicity is collapsed for size counting: hyperedge {v1, v2, v2, v2}
+    // has distinct size 2, not 4. With t=3 it peels even though raw len is 4.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2, v2, v2 });
+        try graph.build();
+
+        var core = try graph.getCore(0, 3);
+        defer core.deinit();
+        try expect(core.countHyperedges() == 0);
+    }
+
+    // Hub + leaves. Hub is in 3 hyperedges (deg 3), each leaf in exactly 1 (deg 1).
+    // With (s=2, t=2): all three leaves have degree 1 → all peeled. Their
+    // hyperedges then drop to size 1 → peeled. Hub now has degree 0 → peeled.
+    // Result is empty.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const hub = try graph.createVertexAssumeCapacity(.{});
+        const leaf_a = try graph.createVertexAssumeCapacity(.{});
+        const leaf_b = try graph.createVertexAssumeCapacity(.{});
+        const leaf_c = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ hub, leaf_a });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ hub, leaf_b });
+        const e3 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e3, &.{ hub, leaf_c });
+        try graph.build();
+
+        var core = try graph.getCore(2, 2);
+        defer core.deinit();
+        try expect(core.countVertices() == 0);
+
+        // (s=1, t=2) keeps everything: every vertex has degree ≥ 1, every
+        // hyperedge has size 2.
+        var weak = try graph.getCore(1, 2);
+        defer weak.deinit();
+        try expect(weak.countVertices() == 4);
+        try expect(weak.countHyperedges() == 3);
+    }
+
+    // Result is independently mutable from the source.
+    {
+        var graph = try h.scaffold();
+        _ = try h.generateTestData(&graph);
+        var core = try graph.getCore(0, 0);
+        defer core.deinit();
+        graph.deinit();
+        // Source is gone; the core must remain fully usable.
+        try expect(core.countVertices() == 5);
+        try core.build();
+        try expect(try core.isConnected());
+    }
+}

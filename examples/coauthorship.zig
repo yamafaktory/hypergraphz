@@ -348,7 +348,38 @@ pub fn main() !void {
     );
     var line_components = try line.getConnectedComponents();
     defer line_components.deinit(allocator);
-    try w.interface.print("  {} components in the line graph\n", .{line_components.data.items.len});
+    try w.interface.print("  {} components in the line graph\n\n", .{line_components.data.items.len});
+
+    // ── 15. K-core decomposition ──────────────────────────────────────────────
+    // The (s, t)-core peels vertices with fewer than `s` incident hyperedges
+    // and hyperedges with fewer than `t` distinct vertices, iterating to a
+    // fixed point. Eve has only one paper, so the (2, 2)-core peels her out;
+    // the rest of the network — every other researcher has ≥ 2 co-authored
+    // papers — survives intact.
+
+    try w.interface.print("K-core decomposition\n", .{});
+    var core22 = try g.getCore(2, 2);
+    defer core22.deinit();
+    try core22.build();
+    try w.interface.print(
+        "  Original:   {} researchers, {} papers\n",
+        .{ g.countVertices(), g.countHyperedges() },
+    );
+    try w.interface.print(
+        "  (2,2)-core: {} researchers, {} papers\n",
+        .{ core22.countVertices(), core22.countHyperedges() },
+    );
+    try w.interface.print("  Peeled:    ", .{});
+    var peeled_any = false;
+    for (g.getAllVertices()) |vid| {
+        core22.checkIfVertexExists(vid) catch {
+            if (peeled_any) try w.interface.print(", ", .{});
+            try w.interface.print("{s}", .{(try g.getVertex(vid)).name});
+            peeled_any = true;
+        };
+    }
+    if (!peeled_any) try w.interface.print("(none)", .{});
+    try w.interface.print("\n", .{});
 
     try w.interface.flush();
 }

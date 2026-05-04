@@ -2583,6 +2583,167 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             return skeleton;
         }
 
+        /// Return the `(s, t)`-core: the unique largest sub-hypergraph in which
+        /// every vertex is incident to at least `s` (surviving) hyperedges and
+        /// every hyperedge contains at least `t` distinct (surviving) vertices.
+        ///
+        /// This is the standard hypergraph generalization of the graph k-core
+        /// (which is recovered by `getCore(k, 2)`). The result is well-defined:
+        /// the peeling procedure converges to the same fixed point regardless
+        /// of the order vertices and hyperedges are removed.
+        ///
+        /// Algorithm: iterative peeling. Initialize each vertex's degree as the
+        /// number of distinct incident hyperedges and each hyperedge's size as
+        /// its distinct vertex count. Repeatedly remove any vertex with degree
+        /// `< s` (decrementing the size of every still-alive hyperedge that
+        /// contained it) and any hyperedge with size `< t` (decrementing the
+        /// degree of every still-alive distinct vertex it contained). Stop when
+        /// neither queue can fire.
+        ///
+        /// Edge cases:
+        /// - `s = 0` and `t = 0`: returns a deep copy of the full hypergraph.
+        /// - `t = 1`: singleton hyperedges are kept (they otherwise vanish).
+        /// - The result may be empty if no `(s, t)`-core exists.
+        ///
+        /// Reference: standard hypergraph core decomposition; see e.g. Sun, Liu,
+        /// Wu, Du, "Fully Dynamic Approximation Algorithms for Distance-Based
+        /// Hypergraph Core Decomposition" / classical formulations starting
+        /// from Seidman 1983 in the graph case.
+        ///
+        /// IDs of surviving vertices and hyperedges are preserved. The result
+        /// owns deep copies of all data; the caller must call `build()` on it
+        /// and is responsible for calling `deinit()`.
+        ///
+        /// Complexity: `O(n + m + Σ |e|)` — each vertex–hyperedge incidence is
+        /// visited a constant number of times across the whole peeling.
+        pub fn getCore(self: *Self, s: usize, t: usize) HypergraphZError!Self {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+
+            // alive sets and live counts. Counts always reflect *surviving*
+            // neighbors, never the original totals.
+            var v_alive: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            var v_deg: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            var h_alive: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            var h_size: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            // Cache the distinct vertex set of each hyperedge so the peel loop
+            // doesn't have to rebuild it when the hyperedge dies.
+            var h_distinct: AutoHashMapUnmanaged(HypergraphZId, []HypergraphZId) = .empty;
+
+            var v_init = self.vertices.iterator();
+            while (v_init.next()) |kv| {
+                try v_alive.put(aa, kv.key_ptr.*, {});
+                // Reverse index is dedup'd by build(), so .relations.items.len
+                // is already the count of distinct incident hyperedges.
+                try v_deg.put(aa, kv.key_ptr.*, kv.value_ptr.relations.items.len);
+            }
+
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            var h_init = self.hyperedges.iterator();
+            while (h_init.next()) |kv| {
+                seen.clearRetainingCapacity();
+                var distinct: ArrayList(HypergraphZId) = .empty;
+                for (kv.value_ptr.relations.items) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (!gop.found_existing) try distinct.append(aa, vid);
+                }
+                const owned = try distinct.toOwnedSlice(aa);
+                try h_distinct.put(aa, kv.key_ptr.*, owned);
+                try h_alive.put(aa, kv.key_ptr.*, {});
+                try h_size.put(aa, kv.key_ptr.*, owned.len);
+            }
+
+            // Worklists. `to_remove_*` may contain duplicate IDs; the alive
+            // check at pop time deduplicates without an extra set.
+            var to_remove_v: ArrayList(HypergraphZId) = .empty;
+            var to_remove_h: ArrayList(HypergraphZId) = .empty;
+
+            var v_seed = v_deg.iterator();
+            while (v_seed.next()) |kv| {
+                if (kv.value_ptr.* < s) try to_remove_v.append(aa, kv.key_ptr.*);
+            }
+            var h_seed = h_size.iterator();
+            while (h_seed.next()) |kv| {
+                if (kv.value_ptr.* < t) try to_remove_h.append(aa, kv.key_ptr.*);
+            }
+
+            while (to_remove_v.items.len > 0 or to_remove_h.items.len > 0) {
+                if (to_remove_v.pop()) |vid| {
+                    if (v_alive.contains(vid)) {
+                        _ = v_alive.remove(vid);
+                        const vertex = self.vertices.get(vid).?;
+                        for (vertex.relations.items) |hid| {
+                            if (!h_alive.contains(hid)) continue;
+                            const sz = h_size.getPtr(hid).?;
+                            sz.* -= 1;
+                            if (sz.* < t) try to_remove_h.append(aa, hid);
+                        }
+                    }
+                }
+                if (to_remove_h.pop()) |hid| {
+                    if (h_alive.contains(hid)) {
+                        _ = h_alive.remove(hid);
+                        const distinct = h_distinct.get(hid).?;
+                        for (distinct) |vid| {
+                            if (!v_alive.contains(vid)) continue;
+                            const dg = v_deg.getPtr(vid).?;
+                            dg.* -= 1;
+                            if (dg.* < s) try to_remove_v.append(aa, vid);
+                        }
+                    }
+                }
+            }
+
+            // Materialize the surviving sub-hypergraph, preserving IDs.
+            var core = try Self.init(self.allocator, .{
+                .vertices_capacity = v_alive.count(),
+                .hyperedges_capacity = h_alive.count(),
+            });
+            errdefer core.deinit();
+
+            var v_copy = self.vertices.iterator();
+            while (v_copy.next()) |kv| {
+                if (!v_alive.contains(kv.key_ptr.*)) continue;
+                const new_data = try core.vertices_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
+                try core.vertices.put(self.allocator, kv.key_ptr.*, .{
+                    .relations = .empty,
+                    .data = new_data,
+                });
+                core.id_counter = @max(core.id_counter, kv.key_ptr.*);
+            }
+
+            var h_copy = self.hyperedges.iterator();
+            while (h_copy.next()) |kv| {
+                if (!h_alive.contains(kv.key_ptr.*)) continue;
+                const new_data = try core.hyperedges_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
+                // Filter the original (multiplicity-preserving) vertex list
+                // down to surviving vertices, keeping order.
+                var relations: ArrayList(HypergraphZId) = .empty;
+                for (kv.value_ptr.relations.items) |vid| {
+                    if (v_alive.contains(vid)) try relations.append(self.allocator, vid);
+                }
+                try core.hyperedges.put(self.allocator, kv.key_ptr.*, .{
+                    .relations = relations,
+                    .data = new_data,
+                });
+                core.id_counter = @max(core.id_counter, kv.key_ptr.*);
+            }
+
+            debugAt(@src(), "core(s={}, t={}): {} vertices, {} hyperedges", .{
+                s,
+                t,
+                core.vertices.count(),
+                core.hyperedges.count(),
+            });
+
+            return core;
+        }
+
         /// Return the vertex-induced subhypergraph: a new hypergraph containing
         /// exactly the specified vertices and only the hyperedges whose entire
         /// vertex list is a subset of those vertices (strict).
