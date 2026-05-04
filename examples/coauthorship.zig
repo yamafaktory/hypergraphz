@@ -273,6 +273,82 @@ pub fn main() !void {
         }
         try w.interface.print("\n", .{});
     }
+    try w.interface.print("\n", .{});
+
+    // ── 11. PageRank ──────────────────────────────────────────────────────────
+    // PageRank ranks researchers by stationary probability of the citation-
+    // weighted random walk: each step picks an incident paper proportional to
+    // its citation count, then a co-author uniformly. Highly-cited papers thus
+    // pull mass toward their authors.
+
+    try w.interface.print("PageRank (citation-weighted random walk)\n", .{});
+    var pr = try g.computePageRank(.{});
+    defer pr.deinit(allocator);
+
+    const PrEntry = struct { vid: HypergraphZId, score: f64 };
+    var prs: std.ArrayList(PrEntry) = .empty;
+    defer prs.deinit(allocator);
+    var pr_it = pr.data.iterator();
+    while (pr_it.next()) |kv| try prs.append(allocator, .{ .vid = kv.key_ptr.*, .score = kv.value_ptr.* });
+    std.mem.sort(PrEntry, prs.items, {}, struct {
+        fn desc(_: void, a: PrEntry, b: PrEntry) bool {
+            return a.score > b.score;
+        }
+    }.desc);
+    for (prs.items) |entry| {
+        try w.interface.print("  {s:<16} {d:.4}\n", .{ (try g.getVertex(entry.vid)).name, entry.score });
+    }
+    try w.interface.print("  ({} iterations, converged={})\n\n", .{ pr.iterations, pr.converged });
+
+    // ── 12. Random walk ───────────────────────────────────────────────────────
+    // A short walk from Alice. With a fixed seed the trace is deterministic.
+    // Hops happen via co-authored papers, so the walk never crosses into the
+    // ML community.
+
+    try w.interface.print("Random walk from Alice (12 steps)\n", .{});
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE);
+    const walk = try g.randomWalk(alice, 12, prng.random());
+    defer allocator.free(walk);
+    try w.interface.print("  ", .{});
+    for (walk, 0..) |vid, i| {
+        if (i > 0) try w.interface.print(" → ", .{});
+        try w.interface.print("{s}", .{(try g.getVertex(vid)).name});
+    }
+    try w.interface.print("\n\n", .{});
+
+    // ── 13. Star expansion ────────────────────────────────────────────────────
+    // Each paper becomes a "hub" vertex connected to its authors. The result is
+    // a 2-uniform bipartite graph: researchers ↔ papers. Useful for algorithms
+    // that expect plain graphs while keeping hyperedge identity intact.
+
+    try w.interface.print("Star expansion\n", .{});
+    var star = try g.expandToStar(paperToResearcher);
+    defer star.deinit();
+    try star.build();
+    try w.interface.print(
+        "  {} researchers + {} papers → {} bipartite vertices, {} author-paper pairs\n\n",
+        .{ g.countVertices(), g.countHyperedges(), star.countVertices(), star.countHyperedges() },
+    );
+
+    // ── 14. Line graph ────────────────────────────────────────────────────────
+    // In the line graph, papers become vertices and two papers are linked iff
+    // they share an author. Disjoint communities of authors give disjoint
+    // components in the line graph too.
+
+    try w.interface.print("Line graph (papers linked by shared authors)\n", .{});
+    var line = try g.getLineGraph(
+        paperToResearcher,
+        .{ .title = "(co-authored)", .year = 0, .citations = 1 },
+    );
+    defer line.deinit();
+    try line.build();
+    try w.interface.print(
+        "  {} papers → {} paper-pair links\n",
+        .{ g.countHyperedges(), line.countHyperedges() },
+    );
+    var line_components = try line.getConnectedComponents();
+    defer line_components.deinit(allocator);
+    try w.interface.print("  {} components in the line graph\n", .{line_components.data.items.len});
 
     try w.interface.flush();
 }

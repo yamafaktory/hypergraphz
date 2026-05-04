@@ -673,3 +673,145 @@ test "laplacian collapses vertex multiplicity" {
         }
     }
 }
+
+test "expand to star" {
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try expectError(HypergraphZError.NotBuilt, graph.expandToStar(defaultHyperedgeToVertex));
+    }
+
+    // Empty graph: 0 vertices, 0 hyperedges.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        var star = try graph.expandToStar(defaultHyperedgeToVertex);
+        defer star.deinit();
+        try expect(star.countVertices() == 0);
+        try expect(star.countHyperedges() == 0);
+    }
+
+    // Standard fixture: 5 vertices, 3 hyperedges with raw sizes 5, 3, 7 but
+    // distinct sizes 5, 2 (h_b dedups v_e), 5 (h_c dedups). So the star has
+    // 5 + 3 = 8 vertices and 5 + 2 + 5 = 12 hyperedges, all 2-uniform.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const data = try h.generateTestData(&graph);
+
+        var star = try graph.expandToStar(defaultHyperedgeToVertex);
+        defer star.deinit();
+        try star.build();
+
+        try expect(star.countVertices() == 8);
+        try expect(star.countHyperedges() == 12);
+        try expect(try star.isKUniform(2));
+
+        // Original vertex IDs are preserved.
+        for ([_]HypergraphZId{ data.v_a, data.v_b, data.v_c, data.v_d, data.v_e }) |vid| {
+            _ = try star.getVertex(vid);
+        }
+    }
+
+    // Multiplicity collapse: {v1, v2, v2, v2} produces 2 pair-hyperedges, not 4.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2, v2, v2 });
+        try graph.build();
+
+        var star = try graph.expandToStar(defaultHyperedgeToVertex);
+        defer star.deinit();
+        try expect(star.countVertices() == 3); // v1, v2, hub
+        try expect(star.countHyperedges() == 2); // (v1, hub), (v2, hub)
+    }
+}
+
+test "line graph" {
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try expectError(
+            HypergraphZError.NotBuilt,
+            graph.getLineGraph(defaultHyperedgeToVertex, .{}),
+        );
+    }
+
+    // Empty graph: empty line graph.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        var line = try graph.getLineGraph(defaultHyperedgeToVertex, .{});
+        defer line.deinit();
+        try expect(line.countVertices() == 0);
+        try expect(line.countHyperedges() == 0);
+    }
+
+    // Standard fixture: 3 hyperedges that all share at least one vertex
+    // (h_a ∋ everything, h_b ∋ v_a/v_e, h_c ∋ all 5). Line graph has
+    // 3 vertices and 3 edges (one per unordered pair of hyperedges).
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try h.generateTestData(&graph);
+
+        var line = try graph.getLineGraph(defaultHyperedgeToVertex, .{});
+        defer line.deinit();
+        try line.build();
+
+        try expect(line.countVertices() == 3);
+        try expect(line.countHyperedges() == 3);
+        try expect(try line.isKUniform(2));
+    }
+
+    // Multi-vertex intersection still produces a single line-graph edge —
+    // the pair-dedup must collapse repeated visits via different vertices.
+    // Two hyperedges sharing two vertices: {v1, v2, v3} and {v1, v2, v4}.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2, v3 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v1, v2, v4 });
+        try graph.build();
+
+        var line = try graph.getLineGraph(defaultHyperedgeToVertex, .{});
+        defer line.deinit();
+
+        try expect(line.countVertices() == 2);
+        try expect(line.countHyperedges() == 1);
+    }
+
+    // Disjoint hyperedges produce isolated vertices in the line graph.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const v3 = try graph.createVertexAssumeCapacity(.{});
+        const v4 = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ v1, v2 });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ v3, v4 });
+        try graph.build();
+
+        var line = try graph.getLineGraph(defaultHyperedgeToVertex, .{});
+        defer line.deinit();
+
+        try expect(line.countVertices() == 2);
+        try expect(line.countHyperedges() == 0);
+    }
+}

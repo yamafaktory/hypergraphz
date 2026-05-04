@@ -297,3 +297,82 @@ test "transitive closure owns its data independently" {
     graph.deinit();
     try expect((try closure.getVertex(data.v_a)).purr == true);
 }
+
+test "random walk" {
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        var prng = std.Random.DefaultPrng.init(42);
+        try expectError(
+            HypergraphZError.NotBuilt,
+            graph.randomWalk(1, 5, prng.random()),
+        );
+    }
+
+    // Unknown start vertex.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        var prng = std.Random.DefaultPrng.init(42);
+        try expectError(
+            HypergraphZError.VertexNotFound,
+            graph.randomWalk(max_id, 5, prng.random()),
+        );
+    }
+
+    // Zero steps: result is just [start].
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const data = try h.generateTestData(&graph);
+        var prng = std.Random.DefaultPrng.init(42);
+        const path = try graph.randomWalk(data.v_a, 0, prng.random());
+        defer graph.allocator.free(path);
+        try expect(path.len == 1);
+        try expect(path[0] == data.v_a);
+    }
+
+    // Length is exactly steps + 1, every visited vertex exists, walk stays
+    // within the connected component of the start (the test fixture is fully
+    // connected via h_a / h_b / h_c so all 5 vertices are reachable).
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const data = try h.generateTestData(&graph);
+        var prng = std.Random.DefaultPrng.init(42);
+        const path = try graph.randomWalk(data.v_a, 50, prng.random());
+        defer graph.allocator.free(path);
+        try expect(path.len == 51);
+        try expect(path[0] == data.v_a);
+        for (path) |vid| _ = try graph.getVertex(vid);
+    }
+
+    // Determinism: same seed → same walk.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const data = try h.generateTestData(&graph);
+        var prng_a = std.Random.DefaultPrng.init(123);
+        var prng_b = std.Random.DefaultPrng.init(123);
+        const path_a = try graph.randomWalk(data.v_a, 20, prng_a.random());
+        defer graph.allocator.free(path_a);
+        const path_b = try graph.randomWalk(data.v_a, 20, prng_b.random());
+        defer graph.allocator.free(path_b);
+        try expectEqualSlices(HypergraphZId, path_a, path_b);
+    }
+
+    // Isolated start: walk stays put for the full length.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const lonely = try graph.createVertexAssumeCapacity(.{});
+        try graph.build();
+        var prng = std.Random.DefaultPrng.init(42);
+        const path = try graph.randomWalk(lonely, 10, prng.random());
+        defer graph.allocator.free(path);
+        try expect(path.len == 11);
+        for (path) |vid| try expect(vid == lonely);
+    }
+}

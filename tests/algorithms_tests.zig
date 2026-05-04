@@ -334,3 +334,113 @@ test "get connected components" {
         try expect(result.data.items[1][0] == disconnected);
     }
 }
+
+test "compute pagerank" {
+    const approxEq = std.math.approxEqAbs;
+
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try expectError(HypergraphZError.NotBuilt, graph.computePageRank(.{}));
+    }
+
+    // Empty graph: empty result, trivially "converged".
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        var pr = try graph.computePageRank(.{});
+        defer pr.deinit(std.testing.allocator);
+        try expect(pr.data.count() == 0);
+        try expect(pr.converged);
+    }
+
+    // Single isolated vertex: it owns all the mass.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v = try graph.createVertexAssumeCapacity(.{});
+        try graph.build();
+        var pr = try graph.computePageRank(.{});
+        defer pr.deinit(std.testing.allocator);
+        try expect(approxEq(f64, pr.data.get(v).?, 1.0, 1e-6));
+        try expect(pr.converged);
+    }
+
+    // Symmetric dyad: scores must be equal and sum to 1.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v1 = try graph.createVertexAssumeCapacity(.{});
+        const v2 = try graph.createVertexAssumeCapacity(.{});
+        const e = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e, &.{ v1, v2 });
+        try graph.build();
+
+        var pr = try graph.computePageRank(.{});
+        defer pr.deinit(std.testing.allocator);
+        const r1 = pr.data.get(v1).?;
+        const r2 = pr.data.get(v2).?;
+        try expect(approxEq(f64, r1, 0.5, 1e-6));
+        try expect(approxEq(f64, r2, 0.5, 1e-6));
+        try expect(approxEq(f64, r1 + r2, 1.0, 1e-9));
+        try expect(pr.converged);
+    }
+
+    // Sum-to-one property on the full mixed-weight test graph.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try h.generateTestData(&graph);
+
+        var pr = try graph.computePageRank(.{});
+        defer pr.deinit(std.testing.allocator);
+        try expect(pr.converged);
+
+        var total: f64 = 0;
+        var it = pr.data.iterator();
+        while (it.next()) |kv| {
+            try expect(kv.value_ptr.* > 0);
+            total += kv.value_ptr.*;
+        }
+        try expect(approxEq(f64, total, 1.0, 1e-6));
+    }
+
+    // Star topology: a hub vertex shared by every hyperedge should outrank
+    // any leaf that appears in only one hyperedge.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const hub = try graph.createVertexAssumeCapacity(.{});
+        const leaf_a = try graph.createVertexAssumeCapacity(.{});
+        const leaf_b = try graph.createVertexAssumeCapacity(.{});
+        const leaf_c = try graph.createVertexAssumeCapacity(.{});
+        const e1 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e1, &.{ hub, leaf_a });
+        const e2 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e2, &.{ hub, leaf_b });
+        const e3 = try graph.createHyperedgeAssumeCapacity(.{ .weight = 1 });
+        try graph.appendVerticesToHyperedge(e3, &.{ hub, leaf_c });
+        try graph.build();
+
+        var pr = try graph.computePageRank(.{});
+        defer pr.deinit(std.testing.allocator);
+
+        const hub_score = pr.data.get(hub).?;
+        try expect(hub_score > pr.data.get(leaf_a).?);
+        try expect(hub_score > pr.data.get(leaf_b).?);
+        try expect(hub_score > pr.data.get(leaf_c).?);
+    }
+
+    // Iteration cap: a tiny budget exits cleanly with `converged = false`.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try h.generateTestData(&graph);
+        var pr = try graph.computePageRank(.{ .max_iterations = 1, .tolerance = 0 });
+        defer pr.deinit(std.testing.allocator);
+        try expect(!pr.converged);
+        try expect(pr.iterations == 1);
+    }
+}

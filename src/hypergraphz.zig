@@ -1546,6 +1546,102 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             return result.toOwnedSlice(self.allocator);
         }
 
+        /// Perform a random walk on the (undirected) hypergraph starting at `start`.
+        /// At each step, pick an incident hyperedge `e` with probability proportional
+        /// to its weight `w(e)`, then pick a vertex from `e` uniformly at random
+        /// (matching the transition matrix `P = D_v⁻¹ H W D_e⁻¹ Hᵀ` underlying
+        /// `computePageRank` and the spectral hypergraph Laplacian).
+        ///
+        /// Vertex multiplicity within a hyperedge is collapsed to a single occurrence
+        /// before sampling, consistent with the convention used by `toIncidenceMatrix`
+        /// and `toLaplacian`.
+        ///
+        /// Note: this walk is intentionally *not* the directed window-pair walk
+        /// used by `breadthFirstSearch` / `depthFirstSearch`. See the wider
+        /// undirected vs. directed discussion in `toLaplacian`'s docs.
+        ///
+        /// Returns a slice of length `steps + 1` containing the visited vertices,
+        /// with `result[0] == start`. If a step lands on a vertex with no incident
+        /// hyperedges (an isolated vertex; reachable mid-walk only if the start is
+        /// itself isolated), the walk stays put for the remaining steps.
+        ///
+        /// The caller is responsible for freeing the result with
+        /// `graph.allocator.free(result)`.
+        pub fn randomWalk(
+            self: *Self,
+            start: HypergraphZId,
+            steps: usize,
+            random: std.Random,
+        ) HypergraphZError![]const HypergraphZId {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+            try self.checkIfVertexExists(start);
+
+            const path = try self.allocator.alloc(HypergraphZId, steps + 1);
+            errdefer self.allocator.free(path);
+            path[0] = start;
+
+            // Scratch buffers reused across steps. `weights` and `cum_weights`
+            // hold per-incident-hyperedge weights for proportional sampling;
+            // `distinct` holds the deduplicated vertex list of a chosen hyperedge.
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+            var cum_weights: ArrayList(f64) = .empty;
+            var distinct: ArrayList(HypergraphZId) = .empty;
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+
+            var current = start;
+            for (1..steps + 1) |i| {
+                const vertex = self.vertices.get(current).?;
+                const incident = vertex.relations.items;
+                if (incident.len == 0) {
+                    // Isolated vertex: stay put for the remainder of the walk.
+                    path[i] = current;
+                    continue;
+                }
+
+                // Weighted sampling among incident hyperedges by `w(e)`.
+                cum_weights.clearRetainingCapacity();
+                var total: f64 = 0;
+                for (incident) |hid| {
+                    const hyperedge = self.hyperedges.get(hid).?;
+                    const w_int = @field(hyperedge.data.*, options.weight_field);
+                    const w: f64 = @floatFromInt(w_int);
+                    total += w;
+                    try cum_weights.append(aa, total);
+                }
+                // `random.float(f64)` returns [0, 1); scale to [0, total).
+                const r_h = random.float(f64) * total;
+                var chosen_e_idx: usize = 0;
+                for (cum_weights.items, 0..) |c, idx| {
+                    if (r_h < c) {
+                        chosen_e_idx = idx;
+                        break;
+                    }
+                }
+                const e = incident[chosen_e_idx];
+
+                // Uniform sampling among the chosen hyperedge's distinct vertices.
+                distinct.clearRetainingCapacity();
+                seen.clearRetainingCapacity();
+                const verts = self.hyperedges.get(e).?.relations.items;
+                for (verts) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (gop.found_existing) continue;
+                    try distinct.append(aa, vid);
+                }
+                // `distinct.items.len > 0` is guaranteed: this hyperedge appears
+                // in `current`'s incidence list, so it must contain at least
+                // `current`.
+                const v_idx = random.uintLessThan(usize, distinct.items.len);
+                current = distinct.items[v_idx];
+                path[i] = current;
+            }
+
+            debugAt(@src(), "from {}: {} steps", .{ start, steps });
+            return path;
+        }
+
         /// Struct containing all simple paths between two vertices.
         /// The caller is responsible for freeing the memory with `deinit`.
         pub const AllPathsResult = struct {
@@ -1953,6 +2049,185 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             }
 
             debugAt(@src(), "{} vertices processed", .{n});
+            return result;
+        }
+
+        /// Options for `computePageRank`.
+        ///
+        /// Defaults match the original Brin–Page paper: damping `α = 0.85`,
+        /// tolerance `1e-6` on the L1 distance between successive iterates,
+        /// up to 100 iterations.
+        pub const PageRankOptions = struct {
+            /// Damping factor `α`. Probability that a walker follows the
+            /// hypergraph at each step (vs. teleporting). Conventional range
+            /// is `[0.7, 0.95]`.
+            damping: f64 = 0.85,
+            /// L1 convergence tolerance on `‖r_{k+1} − r_k‖₁`.
+            tolerance: f64 = 1e-6,
+            /// Hard cap on iterations. The result reports whether convergence
+            /// was reached within this budget via `converged`.
+            max_iterations: usize = 100,
+        };
+
+        /// Result of `computePageRank`. `data` maps each vertex id to its
+        /// stationary probability under the lazy random walk; the scores sum
+        /// to 1.0 (up to floating-point error). `iterations` is the number of
+        /// power-iteration sweeps actually performed; `converged` indicates
+        /// whether the L1 tolerance was met before the iteration cap.
+        pub const PageRankResult = struct {
+            data: AutoArrayHashMap(HypergraphZId, f64),
+            iterations: usize,
+            converged: bool,
+
+            pub fn deinit(self: *PageRankResult, allocator: Allocator) void {
+                self.data.deinit(allocator);
+                self.* = undefined;
+            }
+        };
+
+        /// Compute PageRank scores using power iteration on the hypergraph
+        /// random-walk transition matrix
+        ///
+        ///   `P = D_v⁻¹ H W D_e⁻¹ Hᵀ`
+        ///
+        /// (the same walk as `randomWalk`), with damping factor `α` and a
+        /// uniform teleport vector. The update rule is
+        ///
+        ///   `r_{k+1} = α · Pᵀ r_k + (1 − α) · 1/n  + α · dangling/n`
+        ///
+        /// where the last term redistributes mass from isolated vertices
+        /// (`d(v) = 0`) uniformly — the standard sink-handling fix from
+        /// Page–Brin.
+        ///
+        /// Implementation note: rather than form `Pᵀ r` directly (which is
+        /// `O(n²)` per iteration), the inner loop uses a per-hyperedge
+        /// reduction `S_e = Σ_{v ∈ e} r[v] / d(v)` and then distributes
+        /// `α · w(e)/δ(e) · S_e` to each `u ∈ e`. Both passes run in
+        /// `O(Σ |e|)`, i.e. proportional to the number of incidences.
+        ///
+        /// References:
+        /// - Brin & Page, "The Anatomy of a Large-Scale Hypertextual Web
+        ///   Search Engine", WWW7 1998:
+        ///   http://infolab.stanford.edu/~backrub/google.html
+        /// - Zhou, Huang & Schölkopf, "Learning with Hypergraphs", NeurIPS 2006.
+        ///
+        /// Hyperedges with `δ(e) = 0` (orphans) are skipped; vertex
+        /// multiplicity within a hyperedge is collapsed to 0/1, matching the
+        /// conventions of `toLaplacian` / `toIncidenceMatrix`.
+        ///
+        /// Complexity: `O(iterations · Σ |e|)`.
+        /// The caller is responsible for freeing the result with `deinit`.
+        pub fn computePageRank(
+            self: *Self,
+            opts: PageRankOptions,
+        ) HypergraphZError!PageRankResult {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+
+            const n = self.vertices.count();
+
+            var result: PageRankResult = .{
+                .data = .empty,
+                .iterations = 0,
+                .converged = true,
+            };
+            errdefer result.deinit(self.allocator);
+            try result.data.ensureTotalCapacity(self.allocator, @intCast(n));
+
+            if (n == 0) return result;
+
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+
+            const vertex_ids = self.vertices.keys();
+            var vertex_index: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            try vertex_index.ensureTotalCapacity(aa, @intCast(n));
+            for (vertex_ids, 0..) |vid, i| {
+                vertex_index.putAssumeCapacity(vid, i);
+            }
+
+            // Per-hyperedge: weight + distinct vertex indices. Pre-compute once,
+            // then walk each iteration. Skip orphan hyperedges (δ=0).
+            const HData = struct {
+                w: f64,
+                verts: []usize,
+            };
+            var h_data: ArrayList(HData) = .empty;
+
+            const degrees = try aa.alloc(f64, n);
+            @memset(degrees, 0);
+
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
+                seen.clearRetainingCapacity();
+                var distinct: ArrayList(usize) = .empty;
+                for (kv.value_ptr.relations.items) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (gop.found_existing) continue;
+                    try distinct.append(aa, vertex_index.get(vid).?);
+                }
+                if (distinct.items.len == 0) continue;
+                const w_int = @field(kv.value_ptr.data.*, options.weight_field);
+                const w: f64 = @floatFromInt(w_int);
+                for (distinct.items) |idx| degrees[idx] += w;
+                try h_data.append(aa, .{
+                    .w = w,
+                    .verts = try distinct.toOwnedSlice(aa),
+                });
+            }
+
+            // Power iteration buffers.
+            const r = try aa.alloc(f64, n);
+            const r_new = try aa.alloc(f64, n);
+            const inv_n: f64 = 1.0 / @as(f64, @floatFromInt(n));
+            @memset(r, inv_n);
+
+            const teleport = (1.0 - opts.damping) * inv_n;
+
+            var iter: usize = 0;
+            var converged = false;
+            while (iter < opts.max_iterations) : (iter += 1) {
+                // Dangling mass: r[v] for vertices with no incident hyperedges
+                // (degree 0). Redistributed uniformly across all vertices.
+                var dangling: f64 = 0;
+                for (0..n) |i| {
+                    if (degrees[i] == 0) dangling += r[i];
+                }
+                const dangling_share = opts.damping * dangling * inv_n;
+                @memset(r_new, teleport + dangling_share);
+
+                // Per-hyperedge contribution: each `u ∈ e` receives
+                // `α · w(e) / δ(e) · S_e` where `S_e = Σ_{v ∈ e} r[v] / d(v)`.
+                for (h_data.items) |he| {
+                    var S: f64 = 0;
+                    for (he.verts) |v_idx| {
+                        if (degrees[v_idx] > 0) S += r[v_idx] / degrees[v_idx];
+                    }
+                    const delta_f: f64 = @floatFromInt(he.verts.len);
+                    const factor = opts.damping * he.w / delta_f * S;
+                    for (he.verts) |u_idx| {
+                        r_new[u_idx] += factor;
+                    }
+                }
+
+                var diff: f64 = 0;
+                for (r, r_new) |a, b| diff += @abs(a - b);
+                @memcpy(r, r_new);
+                if (diff < opts.tolerance) {
+                    iter += 1;
+                    converged = true;
+                    break;
+                }
+            }
+
+            for (vertex_ids, 0..) |vid, i| {
+                result.data.putAssumeCapacity(vid, r[i]);
+            }
+            result.iterations = iter;
+            result.converged = converged;
+
+            debugAt(@src(), "{} iterations, converged={}", .{ iter, converged });
             return result;
         }
 
@@ -2503,6 +2778,190 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             });
 
             return graph;
+        }
+
+        /// Star (bipartite) expansion of the hypergraph.
+        ///
+        /// For each original hyperedge `e` a new "hub" vertex is created with
+        /// data computed by `hyperedgeToVertex(e_data)`. Each original vertex
+        /// `v ∈ e` is then connected to that hub via a 2-vertex hyperedge that
+        /// inherits the original hyperedge's data. The result is bipartite
+        /// between original vertices and hub vertices, and 2-uniform.
+        ///
+        /// Original vertex IDs are preserved; hub vertices and pair-hyperedges
+        /// receive fresh IDs from a counter seeded above the maximum original
+        /// id, so no collisions occur. Multiplicity within a hyperedge is
+        /// collapsed: a vertex listed twice in the same hyperedge produces one
+        /// pair-hyperedge to that hub, not two.
+        ///
+        /// This is the standard counterpart to `expandToGraph` (clique
+        /// expansion). Star expansion preserves hyperedge identity (each
+        /// hyperedge survives as a hub), at the cost of `O(Σ |e|)` new
+        /// hyperedges and `m` new vertices. Clique expansion does the opposite.
+        ///
+        /// The result owns deep copies of all data and may be safely mutated
+        /// independently of the source. The caller must call `build()` on the
+        /// result and is responsible for calling `deinit()` on it.
+        pub fn expandToStar(
+            self: *Self,
+            hyperedgeToVertex: fn (H) V,
+        ) HypergraphZError!Self {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+
+            // Pre-count distinct (vertex, hyperedge) incidences for capacity sizing.
+            var pair_count: usize = 0;
+            {
+                var arena: ArenaAllocator = .init(self.allocator);
+                defer arena.deinit();
+                const aa = arena.allocator();
+                var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+                var h_it = self.hyperedges.iterator();
+                while (h_it.next()) |kv| {
+                    seen.clearRetainingCapacity();
+                    for (kv.value_ptr.relations.items) |vid| {
+                        const gop = try seen.getOrPut(aa, vid);
+                        if (!gop.found_existing) pair_count += 1;
+                    }
+                }
+            }
+
+            var star = try Self.init(self.allocator, .{
+                .vertices_capacity = self.vertices.count() + self.hyperedges.count(),
+                .hyperedges_capacity = pair_count,
+            });
+            errdefer star.deinit();
+
+            // Copy original vertices preserving their IDs. Also seed id_counter
+            // above any original id (vertex *or* hyperedge) so newly minted hub
+            // and pair-hyperedge IDs don't collide with retained vertex IDs.
+            var v_it = self.vertices.iterator();
+            while (v_it.next()) |kv| {
+                const new_data = try star.vertices_pool.create(self.allocator);
+                new_data.* = kv.value_ptr.data.*;
+                try star.vertices.put(self.allocator, kv.key_ptr.*, .{
+                    .relations = .empty,
+                    .data = new_data,
+                });
+                star.id_counter = @max(star.id_counter, kv.key_ptr.*);
+            }
+            var h_seed_it = self.hyperedges.iterator();
+            while (h_seed_it.next()) |kv| {
+                star.id_counter = @max(star.id_counter, kv.key_ptr.*);
+            }
+
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+            var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+
+            // For each original hyperedge: create a hub vertex, then a 2-vertex
+            // pair-hyperedge (member, hub) for every distinct member.
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
+                const hub_id = try star.createVertex(hyperedgeToVertex(kv.value_ptr.data.*));
+                seen.clearRetainingCapacity();
+                for (kv.value_ptr.relations.items) |vid| {
+                    const gop = try seen.getOrPut(aa, vid);
+                    if (gop.found_existing) continue;
+                    const new_eid = try star.createHyperedge(kv.value_ptr.data.*);
+                    try star.appendVertexToHyperedge(new_eid, vid);
+                    try star.appendVertexToHyperedge(new_eid, hub_id);
+                }
+            }
+
+            debugAt(@src(), "{} vertices, {} hyperedges", .{
+                star.vertices.count(),
+                star.hyperedges.count(),
+            });
+
+            return star;
+        }
+
+        /// Line graph of the hypergraph.
+        ///
+        /// Each original hyperedge becomes a vertex of the line graph (with data
+        /// produced by `hyperedgeToVertex`), and two such vertices are connected
+        /// iff the corresponding original hyperedges share at least one
+        /// (distinct) vertex. The connection is encoded as a 2-vertex hyperedge
+        /// with data `default_hyperedge`, making the result 2-uniform.
+        ///
+        /// Self-loops (a hyperedge with itself) are not produced. Each
+        /// unordered pair of intersecting hyperedges appears at most once,
+        /// regardless of how many vertices they share.
+        ///
+        /// The line graph is the natural counterpart to `getDual`: the dual
+        /// preserves the bipartite incidence structure (edges become vertices
+        /// *and* vertices become edges, swapping roles), while the line graph
+        /// projects onto hyperedge intersections only. Together they cover the
+        /// two standard one-sided projections of a hypergraph.
+        ///
+        /// Reference: standard hypergraph line graph; see e.g. Bermond et al.,
+        /// "Line graphs of hypergraphs I", Discrete Math. 18 (1977):
+        /// https://doi.org/10.1016/0012-365X(77)90075-6
+        ///
+        /// Complexity: `O(Σ_v deg(v)²)` — each original vertex contributes
+        /// pairs over its incident hyperedges.
+        ///
+        /// The caller must call `build()` on the result and is responsible for
+        /// calling `deinit()` on it.
+        pub fn getLineGraph(
+            self: *Self,
+            hyperedgeToVertex: fn (H) V,
+            default_hyperedge: H,
+        ) HypergraphZError!Self {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+
+            var line = try Self.init(self.allocator, .{
+                .vertices_capacity = self.hyperedges.count(),
+                .hyperedges_capacity = null,
+            });
+            errdefer line.deinit();
+
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+
+            // Old hyperedge id → new vertex id in the line graph.
+            var hid_to_vid: AutoHashMapUnmanaged(HypergraphZId, HypergraphZId) = .empty;
+            try hid_to_vid.ensureTotalCapacity(aa, @intCast(self.hyperedges.count()));
+
+            var h_it = self.hyperedges.iterator();
+            while (h_it.next()) |kv| {
+                const new_vid = try line.createVertex(hyperedgeToVertex(kv.value_ptr.data.*));
+                hid_to_vid.putAssumeCapacity(kv.key_ptr.*, new_vid);
+            }
+
+            // Walk each original vertex's incident hyperedges; every pair of
+            // distinct hyperedges in that list shares this vertex, so they
+            // form a line-graph edge. Use an unordered-pair set keyed by
+            // `(min<<32 | max)` to dedup pairs that share multiple vertices.
+            var pair_seen: AutoHashMapUnmanaged(u64, void) = .empty;
+
+            var v_it = self.vertices.iterator();
+            while (v_it.next()) |kv| {
+                const incident = kv.value_ptr.relations.items;
+                for (incident, 0..) |a, i| {
+                    for (incident[i + 1 ..]) |b| {
+                        if (a == b) continue;
+                        const lo: u64 = @min(a, b);
+                        const hi: u64 = @max(a, b);
+                        const key = (lo << 32) | hi;
+                        const gop = try pair_seen.getOrPut(aa, key);
+                        if (gop.found_existing) continue;
+
+                        const new_eid = try line.createHyperedge(default_hyperedge);
+                        try line.appendVertexToHyperedge(new_eid, hid_to_vid.get(a).?);
+                        try line.appendVertexToHyperedge(new_eid, hid_to_vid.get(b).?);
+                    }
+                }
+            }
+
+            debugAt(@src(), "{} vertices, {} hyperedges", .{
+                line.vertices.count(),
+                line.hyperedges.count(),
+            });
+
+            return line;
         }
 
         /// Dense `n × m` incidence matrix where `n = countVertices()` and
