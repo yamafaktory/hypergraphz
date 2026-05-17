@@ -382,6 +382,17 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             return id;
         }
 
+        /// Create multiple hyperedges at once from a slice of payloads.
+        /// Returns a caller-owned slice of IDs allocated with `self.allocator`; free with `allocator.free`.
+        pub fn createHyperedges(self: *Self, payloads: []const H) HypergraphZError![]HypergraphZId {
+            const ids = try self.allocator.alloc(HypergraphZId, payloads.len);
+            errdefer self.allocator.free(ids);
+            for (payloads, ids) |payload, *id| {
+                id.* = try self.createHyperedge(payload);
+            }
+            return ids;
+        }
+
         /// Reserve capacity for the insertion of new hyperedges.
         pub fn reserveHyperedges(self: *Self, additional_capacity: usize) HypergraphZError!void {
             try self.hyperedges.ensureUnusedCapacity(self.allocator, additional_capacity);
@@ -411,6 +422,17 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             });
 
             return id;
+        }
+
+        /// Create multiple vertices at once from a slice of payloads.
+        /// Returns a caller-owned slice of IDs allocated with `self.allocator`; free with `allocator.free`.
+        pub fn createVertices(self: *Self, payloads: []const V) HypergraphZError![]HypergraphZId {
+            const ids = try self.allocator.alloc(HypergraphZId, payloads.len);
+            errdefer self.allocator.free(ids);
+            for (payloads, ids) |payload, *id| {
+                id.* = try self.createVertex(payload);
+            }
+            return ids;
         }
 
         /// Reserve capacity for the insertion of new vertices.

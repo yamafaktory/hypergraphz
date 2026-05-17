@@ -30,6 +30,9 @@ zig build docs
 
 # Build the shared library for Python bindings
 zig build lib -Doptimize=ReleaseFast
+
+# Run Zig benchmarks
+zig build bench
 ```
 
 **Required Zig version:** `0.17.0-dev.242+5d55999d2` (set in `build.zig.zon`).
@@ -59,9 +62,21 @@ uv run ruff check --fix python/ tests-python/
 # Build a platform wheel locally (runs hatch_build.py, which compiles Zig)
 just wheel
 
+# Run Python benchmarks (pyperf — statistical, mirrors Zig output)
+uv run python bench-python/bench_pyperf.py
+uv run python bench-python/bench_pyperf.py --fast   # quick pass
+uv run python bench-python/bench_pyperf.py -o results.json
+uv run python -m pyperf compare_to baseline.json results.json
+
+# Run Python benchmarks with pytest-benchmark (quick table output)
+uv run pytest bench-python/bench_pytest.py -v --benchmark-only
+
 # Shortcuts
 just install-py   # build lib + copy + uv sync
 just test-py      # uv run pytest
+just bench-zig    # zig build bench
+just bench-py     # pyperf (statistical, save with -o results.json)
+just bench-pytest # pytest-benchmark (quick table)
 just lint         # ruff check + format check
 just fmt          # ruff format + fix in-place
 ```

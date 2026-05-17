@@ -161,6 +161,36 @@ export fn hgz_get_vertex_json(
     return 0;
 }
 
+/// Create multiple vertices from a JSON array '[{...}, {...}, ...]'.
+/// Returns a caller-owned array of IDs. Free with hgz_free.
+export fn hgz_add_vertices(
+    h: *Handle,
+    json_ptr: [*]const u8,
+    json_len: usize,
+    out_ptr: *[*]u32,
+    out_len: *usize,
+) i32 {
+    const json = json_ptr[0..json_len];
+    const arena = h.json_arena.allocator();
+    const parsed = std.json.parseFromSlice(std.json.Value, arena, json, .{}) catch return errCode(error.OutOfMemory);
+    const items = parsed.value.array.items;
+
+    const ids = alloc.alloc(u32, items.len) catch return errCode(error.OutOfMemory);
+    for (items, 0..) |item, i| {
+        const item_json = std.json.Stringify.valueAlloc(arena, item, .{}) catch {
+            alloc.free(ids);
+            return errCode(error.OutOfMemory);
+        };
+        ids[i] = h.graph.createVertex(.{ .json = item_json }) catch |e| {
+            alloc.free(ids);
+            return errCode(e);
+        };
+    }
+    out_ptr.* = ids.ptr;
+    out_len.* = ids.len;
+    return 0;
+}
+
 export fn hgz_vertex_count(h: *Handle) usize {
     return h.graph.countVertices();
 }
@@ -185,6 +215,36 @@ export fn hgz_add_hyperedge(
     const json = h.dupeJson(json_ptr, json_len) catch return errCode(error.OutOfMemory);
     const id = h.graph.createHyperedge(.{ .json = json }) catch |e| return errCode(e);
     out_id.* = id;
+    return 0;
+}
+
+/// Create multiple hyperedges from a JSON array '[{...}, {...}, ...]'.
+/// Returns a caller-owned array of IDs. Free with hgz_free.
+export fn hgz_add_hyperedges(
+    h: *Handle,
+    json_ptr: [*]const u8,
+    json_len: usize,
+    out_ptr: *[*]u32,
+    out_len: *usize,
+) i32 {
+    const json = json_ptr[0..json_len];
+    const arena = h.json_arena.allocator();
+    const parsed = std.json.parseFromSlice(std.json.Value, arena, json, .{}) catch return errCode(error.OutOfMemory);
+    const items = parsed.value.array.items;
+
+    const ids = alloc.alloc(u32, items.len) catch return errCode(error.OutOfMemory);
+    for (items, 0..) |item, i| {
+        const item_json = std.json.Stringify.valueAlloc(arena, item, .{}) catch {
+            alloc.free(ids);
+            return errCode(error.OutOfMemory);
+        };
+        ids[i] = h.graph.createHyperedge(.{ .json = item_json }) catch |e| {
+            alloc.free(ids);
+            return errCode(e);
+        };
+    }
+    out_ptr.* = ids.ptr;
+    out_len.* = ids.len;
     return 0;
 }
 

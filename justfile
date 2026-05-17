@@ -34,6 +34,18 @@ fmt:
     uv run ruff format python/ tests-python/
     uv run ruff check --fix python/ tests-python/
 
+# Run Zig benchmarks
+bench-zig:
+    zig build bench
+
+# Run Python benchmarks (pyperf — statistical, mirrors Zig output)
+bench-py:
+    uv run python bench-python/bench_pyperf.py
+
+# Run Python benchmarks with pytest-benchmark (quick table output)
+bench-pytest:
+    uv run pytest bench-python/bench_pytest.py -v --benchmark-only
+
 # Build a platform wheel locally (runs hatch_build.py hook, which compiles Zig)
 wheel:
     uv run python -m cibuildwheel --platform auto

@@ -91,6 +91,19 @@ class Hypergraph:
         raise_for_code(_lib.hgz_add_vertex(self._ptr, raw, len(raw), ctypes.byref(out)), _lib)
         return out.value
 
+    def create_vertices(self, data_list: list[dict]) -> list[int]:
+        """Create multiple vertices in a single call. Returns a list of vertex IDs."""
+        raw = json.dumps(data_list).encode()
+        ptr = _b._PId()
+        length = ctypes.c_size_t(0)
+        raise_for_code(
+            _lib.hgz_add_vertices(
+                self._ptr, raw, len(raw), ctypes.byref(ptr), ctypes.byref(length)
+            ),
+            _lib,
+        )
+        return _read_ids(ptr, length.value)
+
     def delete_vertex(self, vertex_id: int) -> None:
         raise_for_code(_lib.hgz_delete_vertex(self._ptr, vertex_id), _lib)
 
@@ -130,6 +143,19 @@ class Hypergraph:
         out = _b._Id(0)
         raise_for_code(_lib.hgz_add_hyperedge(self._ptr, raw, len(raw), ctypes.byref(out)), _lib)
         return out.value
+
+    def create_hyperedges(self, data_list: list[dict]) -> list[int]:
+        """Create multiple hyperedges in a single call. Returns a list of hyperedge IDs."""
+        raw = json.dumps(data_list).encode()
+        ptr = _b._PId()
+        length = ctypes.c_size_t(0)
+        raise_for_code(
+            _lib.hgz_add_hyperedges(
+                self._ptr, raw, len(raw), ctypes.byref(ptr), ctypes.byref(length)
+            ),
+            _lib,
+        )
+        return _read_ids(ptr, length.value)
 
     def delete_hyperedge(self, hyperedge_id: int, *, drop_vertices: bool = False) -> None:
         raise_for_code(_lib.hgz_delete_hyperedge(self._ptr, hyperedge_id, drop_vertices), _lib)

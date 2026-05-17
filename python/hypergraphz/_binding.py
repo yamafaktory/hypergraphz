@@ -77,6 +77,9 @@ lib.hgz_update_vertex.argtypes = [_Handle, _Id, ctypes.c_char_p, ctypes.c_size_t
 lib.hgz_get_vertex_json.restype = ctypes.c_int
 lib.hgz_get_vertex_json.argtypes = [_Handle, _Id, ctypes.POINTER(ctypes.c_char_p), _PSize]
 
+lib.hgz_add_vertices.restype = ctypes.c_int
+lib.hgz_add_vertices.argtypes = [_Handle, ctypes.c_char_p, ctypes.c_size_t, _PPId, _PSize]
+
 lib.hgz_vertex_count.restype = ctypes.c_size_t
 lib.hgz_vertex_count.argtypes = [_Handle]
 
@@ -87,6 +90,9 @@ lib.hgz_get_all_vertex_ids.argtypes = [_Handle, _PPId, _PSize]
 
 lib.hgz_add_hyperedge.restype = ctypes.c_int
 lib.hgz_add_hyperedge.argtypes = [_Handle, ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(_Id)]
+
+lib.hgz_add_hyperedges.restype = ctypes.c_int
+lib.hgz_add_hyperedges.argtypes = [_Handle, ctypes.c_char_p, ctypes.c_size_t, _PPId, _PSize]
 
 lib.hgz_delete_hyperedge.restype = ctypes.c_int
 lib.hgz_delete_hyperedge.argtypes = [_Handle, _Id, ctypes.c_bool]

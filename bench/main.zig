@@ -181,6 +181,28 @@ pub fn main() !void {
         try bench.end();
     }
 
+    // Bench 6: bulk vertex creation using createVertices (1_000 vertices per call).
+    // Comparable to Bench 2 but uses the bulk API instead of a per-vertex loop.
+    {
+        const payloads = try allocator.alloc(Vertex, 1_000);
+        defer allocator.free(payloads);
+        for (payloads) |*p| p.* = .{};
+
+        var bench: Bench = try .init(
+            allocator,
+            "generate 1_000 hyperedges with 1_000 vertices each using createVertices",
+            .{ .vertices_capacity = 1_000_000, .hyperedges_capacity = 1_000 },
+        );
+        defer bench.deinit();
+        for (0..1_000) |_| {
+            const h = try bench.graph.createHyperedgeAssumeCapacity(.{});
+            const ids = try bench.graph.createVertices(payloads);
+            defer allocator.free(ids);
+            try bench.graph.appendVerticesToHyperedge(h, ids);
+        }
+        try bench.end();
+    }
+
     // Bench 7: build() on 1_000 hyperedges with 1_000 vertices each.
     {
         var bench: Bench = try .init(

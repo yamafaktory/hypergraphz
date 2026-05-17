@@ -13,6 +13,8 @@ license = { text = "MIT" }
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-benchmark>=5.0",
+    "pyperf>=2.8",
     "ruff>=0.4",
     "hatch-vcs>=0.4",
     "cibuildwheel>=2.20",
@@ -67,3 +69,4 @@ known-first-party = ["hypergraphz"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests-python"]
+addopts = "--ignore=bench-python"
