@@ -113,6 +113,17 @@ When adding a new algorithm, explicitly decide which semantics it uses and docum
 
 Use `debugAt(@src(), "message {}", .{arg})` (not `std.log.debug`) for all internal trace output. This emits under the `.hypergraphz` log scope and is gated by the `log_level` variable in non-test builds and by `std.testing.log_level` in test builds.
 
+### Before committing Python changes
+
+Always run lint and format before committing any Python changes:
+
+```bash
+just fmt   # format in-place
+just lint  # verify — must pass with no errors
+```
+
+CI enforces this; a failing lint blocks the entire test matrix.
+
 ### Tests
 
 Tests live in `tests/`, split by section name (e.g. `algorithms_tests.zig`, `projections_tests.zig`). `tests/root.zig` is the entry point that pulls them all in. `tests/helpers.zig` provides `scaffold()` (returns a fresh graph with capacity 5 vertices / 3 hyperedges), `generateTestData()`, and shared type aliases.

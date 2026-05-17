@@ -86,7 +86,9 @@ class HyperedgeQuery:
     def containing(self, vertex_id: int) -> HyperedgeQuery:
         """Filter to hyperedges that contain the given vertex ID."""
         ids = [
-            eid for eid in self._resolve_ids() if vertex_id in self._graph.get_hyperedge_vertices(eid)
+            eid
+            for eid in self._resolve_ids()
+            if vertex_id in self._graph.get_hyperedge_vertices(eid)
         ]
         q = HyperedgeQuery(self._graph, ids)
         q._predicates = list(self._predicates)
