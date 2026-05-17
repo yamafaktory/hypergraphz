@@ -19,9 +19,6 @@ jobs:
           - os: ubuntu-24.04-arm
             arch: aarch64
             zig_target: aarch64-linux-gnu.2.17
-          - os: macos-13
-            arch: x86_64
-            zig_target: x86_64-macos.11.0
           - os: macos-latest
             arch: arm64
             zig_target: aarch64-macos.11.0
