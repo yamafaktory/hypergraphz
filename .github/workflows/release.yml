@@ -15,12 +15,10 @@ jobs:
         include:
           - os: ubuntu-latest
             arch: x86_64
-            zig_url: https://ziglang.org/builds/zig-linux-x86_64-0.17.0-dev.242+5d55999d2.tar.xz
-            zig_dir: zig-linux-x86_64-0.17.0-dev.242+5d55999d2
+            zig_target: x86_64-linux-gnu.2.17
           - os: ubuntu-24.04-arm
             arch: aarch64
-            zig_url: https://ziglang.org/builds/zig-linux-aarch64-0.17.0-dev.242+5d55999d2.tar.xz
-            zig_dir: zig-linux-aarch64-0.17.0-dev.242+5d55999d2
+            zig_target: aarch64-linux-gnu.2.17
           - os: macos-13
             arch: x86_64
           - os: macos-latest
@@ -35,22 +33,33 @@ jobs:
         with:
           python-version: "3.11"
 
-      # macOS and Windows: install Zig via action (manylinux handles Linux separately)
       - uses: mlugg/setup-zig@v2.2.1
-        if: runner.os != 'Linux'
         with:
           version: "0.17.0-dev.242+5d55999d2"
 
-      # Linux: cibuildwheel runs inside manylinux container; install Zig there via symlink
+      # Pre-build the shared library and copy it into the Python package so that
+      # hatchling picks it up without needing zig inside pip's build isolation.
+      - name: Pre-build shared library (Linux — target glibc 2.17 for manylinux)
+        if: runner.os == 'Linux'
+        run: |
+          zig build lib -Doptimize=ReleaseFast -Dtarget=${{ matrix.zig_target }}
+          cp zig-out/lib/libhypergraphz.so python/hypergraphz/
+
+      - name: Pre-build shared library (macOS / Windows)
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          zig build lib -Doptimize=ReleaseFast
+          cp zig-out/lib/libhypergraphz.so python/hypergraphz/ 2>/dev/null || \
+          cp zig-out/lib/libhypergraphz.dylib python/hypergraphz/ 2>/dev/null || \
+          cp zig-out/lib/hypergraphz.dll python/hypergraphz/ 2>/dev/null || true
+
       - name: Build wheels (Linux)
         if: runner.os == 'Linux'
         uses: pypa/cibuildwheel@v2.22.0
         env:
           CIBW_BUILD: "cp311-manylinux_${{ matrix.arch }}"
           CIBW_ARCHS: ${{ matrix.arch }}
-          CIBW_BEFORE_ALL: |
-            curl -fsSL ${{ matrix.zig_url }} | tar xJ -C /opt
-            ln -s /opt/${{ matrix.zig_dir }}/zig /usr/local/bin/zig
 
       - name: Build wheels (macOS / Windows)
         if: runner.os != 'Linux'

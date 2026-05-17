@@ -7,6 +7,8 @@ from pathlib import Path
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 ROOT = Path(__file__).parent
+PKG_DIR = ROOT / "python" / "hypergraphz"
+PATTERNS = ("libhypergraphz.so", "libhypergraphz.dylib", "hypergraphz.dll")
 
 
 class CustomBuildHook(BuildHookInterface):
@@ -14,21 +16,19 @@ class CustomBuildHook(BuildHookInterface):
         if self.target_name == "sdist":
             return
 
-        subprocess.run(
-            ["zig", "build", "lib", "-Doptimize=ReleaseFast"],
-            check=True,
-            cwd=ROOT,
-        )
+        # CI pre-copies the library before invoking cibuildwheel — nothing to do.
+        if any(PKG_DIR.glob(p) for p in PATTERNS):
+            build_data["pure_python"] = False
+            return
 
+        # Local development: build and copy.
         lib_dir = ROOT / "zig-out" / "lib"
-        pkg_dir = ROOT / "python" / "hypergraphz"
+        subprocess.run(["zig", "build", "lib", "-Doptimize=ReleaseFast"], check=True, cwd=ROOT)
 
         copied = False
-        for pattern in ("libhypergraphz.so", "libhypergraphz.dylib", "hypergraphz.dll"):
+        for pattern in PATTERNS:
             for lib in lib_dir.glob(pattern):
-                dst = pkg_dir / lib.name
-                shutil.copy2(lib, dst)
-                build_data["artifacts"].append(str(dst))
+                shutil.copy2(lib, PKG_DIR / lib.name)
                 copied = True
 
         if not copied:

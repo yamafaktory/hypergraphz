@@ -24,6 +24,12 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["python/hypergraphz"]
+# Override .gitignore exclusions — hatchling respects gitignore by default
+artifacts = [
+    "python/hypergraphz/libhypergraphz.so",
+    "python/hypergraphz/libhypergraphz.dylib",
+    "python/hypergraphz/hypergraphz.dll",
+]
 
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
@@ -41,12 +47,6 @@ include = [
 build = "cp311-*"
 skip = "pp*"
 
-[tool.cibuildwheel.linux]
-before-all = """
-    curl -fsSL https://ziglang.org/builds/zig-linux-x86_64-0.17.0-dev.242+5d55999d2.tar.xz | tar xJ -C /opt
-    echo "/opt/zig-linux-x86_64-0.17.0-dev.242+5d55999d2" >> $GITHUB_PATH
-"""
-environment = { PATH = "/opt/zig-linux-x86_64-0.17.0-dev.242+5d55999d2:$PATH" }
 
 [tool.cibuildwheel.macos]
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
