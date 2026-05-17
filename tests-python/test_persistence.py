@@ -102,7 +102,12 @@ def test_save_and_load_rich_payloads():
         g.save(path)
         g2 = Hypergraph.load(path)
         g2.build()
-        assert g2.get_vertex(v) == {"name": "héllo", "score": 3.14, "tags": ["a", "b"], "meta": {"x": 1}}
+        assert g2.get_vertex(v) == {
+            "name": "héllo",
+            "score": 3.14,
+            "tags": ["a", "b"],
+            "meta": {"x": 1},
+        }
         assert g2.get_hyperedge(e) == {"label": "ëdge", "weight": 42}
     finally:
         path.unlink(missing_ok=True)
@@ -154,7 +159,9 @@ def test_query_before_build_raises():
 
 
 def test_save_to_invalid_path():
-    """save() to a non-existent directory raises an exception."""
+    """save() to a non-existent directory raises HypergraphZError."""
+    from hypergraphz import HypergraphZError
+
     g, _, _ = _build_graph()
-    with pytest.raises(Exception):
+    with pytest.raises(HypergraphZError):
         g.save("/nonexistent/dir/graph.hgpz")
