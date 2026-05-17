@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hypergraphz"
+dynamic = ["version"]
+description = "Python bindings for the HypergraphZ hypergraph library"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "hatch-vcs>=0.4",
+    "cibuildwheel>=2.20",
+    "wheel>=0.45",
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/hypergraphz"]
+
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "python/",
+    "src/",
+    "build.zig",
+    "build.zig.zon",
+    "hatch_build.py",
+]
+
+[tool.cibuildwheel]
+build = "cp311-*"
+skip = "pp*"
+
+[tool.cibuildwheel.linux]
+before-all = """
+    curl -fsSL https://ziglang.org/builds/zig-linux-x86_64-0.17.0-dev.242+5d55999d2.tar.xz | tar xJ -C /opt
+    echo "/opt/zig-linux-x86_64-0.17.0-dev.242+5d55999d2" >> $GITHUB_PATH
+"""
+environment = { PATH = "/opt/zig-linux-x86_64-0.17.0-dev.242+5d55999d2:$PATH" }
+
+[tool.cibuildwheel.macos]
+environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
+
+[tool.ruff]
+src = ["python"]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["hypergraphz"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests-python"]

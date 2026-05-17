@@ -2,6 +2,7 @@ const std = @import("std");
 const HypergraphZPath = "src/hypergraphz.zig";
 const BenchPath = "bench/main.zig";
 const TestRootPath = "tests/root.zig";
+const CAbiPath = "src/hgz_c_api.zig";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -95,6 +96,21 @@ pub fn build(b: *std.Build) void {
     });
     example_step.dependOn(&b.addRunArtifact(example_exe).step);
     check_step.dependOn(&example_exe.step);
+
+    // Shared library step (C ABI for Python bindings).
+    const lib_step = b.step("lib", "Build the HypergraphZ shared library (C ABI)");
+    const lib = b.addLibrary(.{
+        .name = "hypergraphz",
+        .linkage = .dynamic,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(CAbiPath),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{.{ .name = "hypergraphz", .module = root_module }},
+        }),
+    });
+    lib_step.dependOn(&b.addInstallArtifact(lib, .{}).step);
 
     // Bench step.
     const bench_source_file = b.path(BenchPath);

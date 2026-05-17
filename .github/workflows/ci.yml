@@ -7,13 +7,37 @@ on:
       - main
 
 jobs:
-  test:
+  test-zig:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2.2.1
         with:
           version: "0.17.0-dev.242+5d55999d2"
-      - run: zig fmt --check src/ build.zig tests/ examples/
+      - run: zig fmt --check src/ bench/ build.zig tests/ examples/
       - run: zig build check
       - run: zig build test --summary all
+
+  test-python:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: "0.17.0-dev.242+5d55999d2"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: extractions/setup-just@v3
+      - name: Build and install shared library + sync deps
+        run: just install-py
+      - name: Lint (ruff)
+        run: |
+          uv run ruff check python/ tests-python/
+          uv run ruff format --check python/ tests-python/
+      - name: Test (pytest)
+        run: uv run pytest tests-python/ -v

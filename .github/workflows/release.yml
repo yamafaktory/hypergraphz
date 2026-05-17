@@ -1,0 +1,109 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-wheels:
+    name: Build wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+            zig_url: https://ziglang.org/builds/zig-linux-x86_64-0.17.0-dev.242+5d55999d2.tar.xz
+            zig_dir: zig-linux-x86_64-0.17.0-dev.242+5d55999d2
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+            zig_url: https://ziglang.org/builds/zig-linux-aarch64-0.17.0-dev.242+5d55999d2.tar.xz
+            zig_dir: zig-linux-aarch64-0.17.0-dev.242+5d55999d2
+          - os: macos-13
+            arch: x86_64
+          - os: macos-latest
+            arch: arm64
+          - os: windows-latest
+            arch: x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      # macOS and Windows: install Zig via action (manylinux handles Linux separately)
+      - uses: mlugg/setup-zig@v2.2.1
+        if: runner.os != 'Linux'
+        with:
+          version: "0.17.0-dev.242+5d55999d2"
+
+      # Linux: cibuildwheel runs inside manylinux container; install Zig there
+      - name: Build wheels (Linux)
+        if: runner.os == 'Linux'
+        uses: pypa/cibuildwheel@v2.22.0
+        env:
+          CIBW_BUILD: "cp311-manylinux_${{ matrix.arch }}"
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_BEFORE_ALL: |
+            curl -fsSL ${{ matrix.zig_url }} | tar xJ -C /opt
+            echo "export PATH=/opt/${{ matrix.zig_dir }}:\$PATH" >> /etc/environment
+          CIBW_ENVIRONMENT: PATH=/opt/${{ matrix.zig_dir }}:$PATH
+
+      - name: Build wheels (macOS / Windows)
+        if: runner.os != 'Linux'
+        uses: pypa/cibuildwheel@v2.22.0
+        env:
+          CIBW_BUILD: "cp311-*"
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+      - name: Retag wheels to py3-none
+        shell: bash
+        run: |
+          uv run python -m wheel tags \
+            --python-tag py3 \
+            --abi-tag none \
+            --remove \
+            wheelhouse/*.whl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist
+        run: uv build --sdist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  publish:
+    name: Publish to PyPI
+    needs: [build-wheels, build-sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

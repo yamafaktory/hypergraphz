@@ -1,2 +1,13 @@
 /zig-*
 /.zig-*
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.dll
+/dist/
+/wheelhouse/
+/.venv/
+*.egg-info/
