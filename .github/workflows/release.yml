@@ -21,10 +21,13 @@ jobs:
             zig_target: aarch64-linux-gnu.2.17
           - os: macos-13
             arch: x86_64
+            zig_target: x86_64-macos.11.0
           - os: macos-latest
             arch: arm64
+            zig_target: aarch64-macos.11.0
           - os: windows-latest
             arch: x86_64
+            zig_target: ""
 
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +52,12 @@ jobs:
         if: runner.os != 'Linux'
         shell: bash
         run: |
-          zig build lib -Doptimize=ReleaseFast
+          TARGET="${{ matrix.zig_target }}"
+          if [ -n "$TARGET" ]; then
+            zig build lib -Doptimize=ReleaseFast -Dtarget="$TARGET"
+          else
+            zig build lib -Doptimize=ReleaseFast
+          fi
           cp zig-out/lib/libhypergraphz.so python/hypergraphz/ 2>/dev/null || \
           cp zig-out/lib/libhypergraphz.dylib python/hypergraphz/ 2>/dev/null || \
           cp zig-out/lib/hypergraphz.dll python/hypergraphz/ 2>/dev/null || true
