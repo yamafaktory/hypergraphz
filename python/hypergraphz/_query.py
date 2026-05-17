@@ -17,7 +17,7 @@ class VertexQuery:
         self._limit_n: int | None = None
 
     def _resolve_ids(self) -> list[int]:
-        return self._ids if self._ids is not None else self._graph.all_vertex_ids()
+        return self._ids if self._ids is not None else self._graph.get_all_vertex_ids()
 
     def where(self, predicate: Callable[[dict], bool]) -> VertexQuery:
         """Filter vertices by a predicate applied to their data dict."""
@@ -30,7 +30,7 @@ class VertexQuery:
         """Expand to all neighbors of the current vertex set (clique-expansion adjacency)."""
         seen: set[int] = set()
         for vid in self._resolve_ids():
-            for nid in self._graph.neighborhood(vid):
+            for nid in self._graph.get_vertex_neighborhood(vid):
                 seen.add(nid)
         q = VertexQuery(self._graph, list(seen))
         q._predicates = list(self._predicates)
@@ -74,7 +74,7 @@ class HyperedgeQuery:
         self._limit_n: int | None = None
 
     def _resolve_ids(self) -> list[int]:
-        return self._ids if self._ids is not None else self._graph.all_hyperedge_ids()
+        return self._ids if self._ids is not None else self._graph.get_all_hyperedge_ids()
 
     def where(self, predicate: Callable[[dict], bool]) -> HyperedgeQuery:
         """Filter hyperedges by a predicate applied to their data dict."""
@@ -86,7 +86,7 @@ class HyperedgeQuery:
     def containing(self, vertex_id: int) -> HyperedgeQuery:
         """Filter to hyperedges that contain the given vertex ID."""
         ids = [
-            eid for eid in self._resolve_ids() if vertex_id in self._graph.hyperedge_vertices(eid)
+            eid for eid in self._resolve_ids() if vertex_id in self._graph.get_hyperedge_vertices(eid)
         ]
         q = HyperedgeQuery(self._graph, ids)
         q._predicates = list(self._predicates)

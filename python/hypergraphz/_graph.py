@@ -84,7 +84,7 @@ class Hypergraph:
 
     # ── Vertices ───────────────────────────────────────────────────────────────
 
-    def add_vertex(self, data: dict) -> int:
+    def create_vertex(self, data: dict) -> int:
         """Add a vertex with JSON-serialisable data. Returns the vertex ID."""
         raw = json.dumps(data).encode()
         out = _b._Id(0)
@@ -110,10 +110,10 @@ class Hypergraph:
         )
         return json.loads(ctypes.string_at(ptr, length.value))
 
-    def vertex_count(self) -> int:
+    def count_vertices(self) -> int:
         return _lib.hgz_vertex_count(self._ptr)
 
-    def all_vertex_ids(self) -> list[int]:
+    def get_all_vertex_ids(self) -> list[int]:
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
         raise_for_code(
@@ -124,7 +124,7 @@ class Hypergraph:
 
     # ── Hyperedges ─────────────────────────────────────────────────────────────
 
-    def add_hyperedge(self, data: dict) -> int:
+    def create_hyperedge(self, data: dict) -> int:
         """Add a hyperedge with JSON-serialisable data. Returns the hyperedge ID."""
         raw = json.dumps(data).encode()
         out = _b._Id(0)
@@ -152,10 +152,10 @@ class Hypergraph:
         )
         return json.loads(ctypes.string_at(ptr, length.value))
 
-    def hyperedge_count(self) -> int:
+    def count_hyperedges(self) -> int:
         return _lib.hgz_hyperedge_count(self._ptr)
 
-    def all_hyperedge_ids(self) -> list[int]:
+    def get_all_hyperedge_ids(self) -> list[int]:
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
         raise_for_code(
@@ -166,7 +166,7 @@ class Hypergraph:
 
     # ── Relations ──────────────────────────────────────────────────────────────
 
-    def connect(self, hyperedge_id: int, vertex_ids: list[int]) -> None:
+    def append_vertices(self, hyperedge_id: int, vertex_ids: list[int]) -> None:
         """Append vertices to a hyperedge (ordered; duplicates allowed)."""
         arr = (_b._Id * len(vertex_ids))(*vertex_ids)
         raise_for_code(
@@ -174,7 +174,7 @@ class Hypergraph:
             _lib,
         )
 
-    def hyperedge_vertices(self, hyperedge_id: int) -> list[int]:
+    def get_hyperedge_vertices(self, hyperedge_id: int) -> list[int]:
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
         raise_for_code(
@@ -185,7 +185,7 @@ class Hypergraph:
         )
         return _read_ids(ptr, length.value)
 
-    def vertex_hyperedges(self, vertex_id: int) -> list[int]:
+    def get_vertex_hyperedges(self, vertex_id: int) -> list[int]:
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
         raise_for_code(
@@ -198,7 +198,7 @@ class Hypergraph:
 
     # ── Traversal ──────────────────────────────────────────────────────────────
 
-    def shortest_path(self, from_id: int, to_id: int) -> list[int] | None:
+    def find_shortest_path(self, from_id: int, to_id: int) -> list[int] | None:
         """Return the shortest directed path as a vertex ID list, or None if unreachable."""
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
@@ -218,7 +218,7 @@ class Hypergraph:
 
     # ── Algorithms ─────────────────────────────────────────────────────────────
 
-    def connected_components(self) -> list[list[int]]:
+    def get_connected_components(self) -> list[list[int]]:
         """Return each weakly-connected component as a list of vertex IDs."""
         flat_ptr = _b._PId()
         sizes_ptr = ctypes.POINTER(ctypes.c_size_t)()
@@ -244,7 +244,7 @@ class Hypergraph:
             offset += size
         return components
 
-    def cut_vertices(self) -> list[int]:
+    def find_cut_vertices(self) -> list[int]:
         """Return vertex IDs whose removal increases the number of connected components."""
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
@@ -254,7 +254,7 @@ class Hypergraph:
         )
         return _read_ids(ptr, length.value)
 
-    def neighborhood(self, vertex_id: int) -> list[int]:
+    def get_vertex_neighborhood(self, vertex_id: int) -> list[int]:
         """Return IDs of vertices sharing at least one hyperedge (clique-expansion adjacency)."""
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
@@ -277,13 +277,13 @@ class Hypergraph:
 
     # ── Degree ─────────────────────────────────────────────────────────────────
 
-    def vertex_indegree(self, vertex_id: int) -> int:
+    def get_vertex_indegree(self, vertex_id: int) -> int:
         """Number of hyperedges in which this vertex appears as a non-first member."""
         out = ctypes.c_size_t(0)
         raise_for_code(_lib.hgz_get_vertex_indegree(self._ptr, vertex_id, ctypes.byref(out)), _lib)
         return out.value
 
-    def vertex_outdegree(self, vertex_id: int) -> int:
+    def get_vertex_outdegree(self, vertex_id: int) -> int:
         """Number of hyperedges in which this vertex appears as a non-last member."""
         out = ctypes.c_size_t(0)
         raise_for_code(_lib.hgz_get_vertex_outdegree(self._ptr, vertex_id, ctypes.byref(out)), _lib)
@@ -346,7 +346,7 @@ class Hypergraph:
 
     # ── Orphan queries ─────────────────────────────────────────────────────────
 
-    def orphan_vertices(self) -> list[int]:
+    def get_orphan_vertices(self) -> list[int]:
         """Return vertex IDs that belong to no hyperedge."""
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
@@ -355,7 +355,7 @@ class Hypergraph:
         )
         return _read_ids(ptr, length.value)
 
-    def orphan_hyperedges(self) -> list[int]:
+    def get_orphan_hyperedges(self) -> list[int]:
         """Return hyperedge IDs that contain no vertices."""
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
@@ -367,7 +367,7 @@ class Hypergraph:
 
     # ── Set operations ─────────────────────────────────────────────────────────
 
-    def intersections(self, hyperedge_ids: list[int]) -> list[int]:
+    def get_intersections(self, hyperedge_ids: list[int]) -> list[int]:
         """Return vertex IDs present in ALL given hyperedges (requires ≥2 IDs)."""
         arr = (_b._Id * len(hyperedge_ids))(*hyperedge_ids)
         ptr = _b._PId()
@@ -380,7 +380,7 @@ class Hypergraph:
         )
         return _read_ids(ptr, length.value)
 
-    def hyperedges_connecting(self, v1_id: int, v2_id: int) -> list[int]:
+    def get_hyperedges_connecting(self, v1_id: int, v2_id: int) -> list[int]:
         """Return IDs of hyperedges that contain both v1_id and v2_id."""
         ptr = _b._PId()
         length = ctypes.c_size_t(0)
@@ -394,7 +394,7 @@ class Hypergraph:
 
     # ── Endpoints ──────────────────────────────────────────────────────────────
 
-    def endpoints(
+    def get_endpoints(
         self,
     ) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
         """Return (initial, terminal) endpoint pairs as (hyperedge_id, vertex_id) tuples."""
@@ -427,7 +427,7 @@ class Hypergraph:
 
     # ── Relation mutations ─────────────────────────────────────────────────────
 
-    def prepend(self, hyperedge_id: int, vertex_ids: list[int]) -> None:
+    def prepend_vertices(self, hyperedge_id: int, vertex_ids: list[int]) -> None:
         """Prepend vertices to the front of a hyperedge's relation list."""
         arr = (_b._Id * len(vertex_ids))(*vertex_ids)
         raise_for_code(
@@ -438,27 +438,27 @@ class Hypergraph:
         """Insert a single vertex at the given position in a hyperedge."""
         raise_for_code(_lib.hgz_insert_vertex(self._ptr, hyperedge_id, vertex_id, index), _lib)
 
-    def insert_many(self, hyperedge_id: int, vertex_ids: list[int], index: int) -> None:
+    def insert_vertices(self, hyperedge_id: int, vertex_ids: list[int], index: int) -> None:
         """Insert multiple vertices at the given position in a hyperedge."""
         arr = (_b._Id * len(vertex_ids))(*vertex_ids)
         raise_for_code(
             _lib.hgz_insert_vertices(self._ptr, hyperedge_id, arr, len(vertex_ids), index), _lib
         )
 
-    def disconnect(self, hyperedge_id: int, vertex_id: int) -> None:
+    def delete_vertex_from_hyperedge(self, hyperedge_id: int, vertex_id: int) -> None:
         """Remove the first occurrence of vertex_id from hyperedge_id."""
         raise_for_code(
             _lib.hgz_remove_vertex_from_hyperedge(self._ptr, hyperedge_id, vertex_id), _lib
         )
 
-    def disconnect_at(self, hyperedge_id: int, index: int) -> None:
+    def delete_vertex_at_index(self, hyperedge_id: int, index: int) -> None:
         """Remove the vertex at the given index from hyperedge_id."""
         raise_for_code(_lib.hgz_remove_vertex_at_index(self._ptr, hyperedge_id, index), _lib)
 
     # ── Centrality and PageRank ────────────────────────────────────────────────
 
-    def centrality(self) -> dict[int, dict[str, float]]:
-        """Compute degree, closeness, and betweenness centrality for all vertices."""
+    def compute_centrality(self) -> dict[int, dict[str, float]]:
+        """Compute degree, closeness, and betweenness compute_centrality for all vertices."""
         ids_ptr = _b._PId()
         deg_ptr = _b._PDouble()
         clo_ptr = _b._PDouble()
@@ -490,7 +490,7 @@ class Hypergraph:
         _safe_free(bet_ptr, count)
         return result
 
-    def page_rank(
+    def compute_page_rank(
         self,
         damping: float = 0.85,
         max_iterations: int = 100,
@@ -524,7 +524,7 @@ class Hypergraph:
 
     # ── Structural analysis ────────────────────────────────────────────────────
 
-    def inclusions(self) -> list[tuple[int, int]]:
+    def get_inclusions(self) -> list[tuple[int, int]]:
         """Return (subset_id, superset_id) pairs where one hyperedge's vertices ⊆ another's."""
         subsets_ptr = _b._PId()
         supersets_ptr = _b._PId()
@@ -544,7 +544,7 @@ class Hypergraph:
         _safe_free(supersets_ptr, count)
         return result
 
-    def nestedness_profile(self) -> list[dict]:
+    def get_nestedness_profile(self) -> list[dict]:
         """Per-order nestedness profile: list of {size, included, total} dicts."""
         sizes_ptr = ctypes.POINTER(ctypes.c_size_t)()
         included_ptr = ctypes.POINTER(ctypes.c_size_t)()
@@ -570,7 +570,7 @@ class Hypergraph:
         _safe_free(total_ptr, count)
         return result
 
-    def incidence_matrix(self) -> dict:
+    def to_incidence_matrix(self) -> dict:
         """Dense incidence matrix (vertices × hyperedges).
 
         Returns {"data": list[list[int]], "vertex_ids": list[int], "hyperedge_ids": list[int]}.
@@ -600,7 +600,7 @@ class Hypergraph:
         _safe_free(hyperedge_ids_ptr, c)
         return {"data": data, "vertex_ids": vertex_ids, "hyperedge_ids": hyperedge_ids}
 
-    def incidence_matrix_coo(self) -> dict:
+    def to_incidence_matrix_coo(self) -> dict:
         """Sparse incidence matrix in COO format.
 
         Returns {"rows", "cols", "vertex_ids", "hyperedge_ids"} as lists.
@@ -639,7 +639,7 @@ class Hypergraph:
         _safe_free(hyperedge_ids_ptr, nhe)
         return result
 
-    def laplacian(self, normalized: bool = True) -> dict:
+    def to_laplacian(self, normalized: bool = True) -> dict:
         """Dense Laplacian matrix (n×n, row-major).
 
         Returns {"data": list[list[float]], "vertex_ids": list[int]}.
@@ -666,7 +666,7 @@ class Hypergraph:
         _safe_free(vertex_ids_ptr, size)
         return {"data": data, "vertex_ids": vertex_ids}
 
-    def all_paths(self, from_id: int, to_id: int) -> list[list[int]]:
+    def find_all_paths(self, from_id: int, to_id: int) -> list[list[int]]:
         """Return all simple directed paths from from_id to to_id."""
         flat_ptr = _b._PId()
         sizes_ptr = ctypes.POINTER(ctypes.c_size_t)()
@@ -708,13 +708,13 @@ class Hypergraph:
         raise_for_code(_lib.hgz_clone(self._ptr, ctypes.byref(out)), _lib)
         return self._wrap_handle(out)
 
-    def dual(self) -> Hypergraph:
-        """Return the dual hypergraph (vertices ↔ hyperedges)."""
+    def get_dual(self) -> Hypergraph:
+        """Return the get_dual hypergraph (vertices ↔ hyperedges)."""
         out = ctypes.c_void_p()
         raise_for_code(_lib.hgz_get_dual(self._ptr, ctypes.byref(out)), _lib)
         return self._wrap_handle(out)
 
-    def k_skeleton(self, k: int) -> Hypergraph:
+    def get_k_skeleton(self, k: int) -> Hypergraph:
         """Return all vertices and only hyperedges with at most k vertices."""
         out = ctypes.c_void_p()
         raise_for_code(_lib.hgz_get_k_skeleton(self._ptr, k, ctypes.byref(out)), _lib)
@@ -732,13 +732,13 @@ class Hypergraph:
         raise_for_code(_lib.hgz_expand_to_star(self._ptr, ctypes.byref(out)), _lib)
         return self._wrap_handle(out)
 
-    def line_graph(self) -> Hypergraph:
+    def get_line_graph(self) -> Hypergraph:
         """Return the line graph (hyperedges become vertices, sharing a vertex = edge)."""
         out = ctypes.c_void_p()
         raise_for_code(_lib.hgz_get_line_graph(self._ptr, ctypes.byref(out)), _lib)
         return self._wrap_handle(out)
 
-    def vertex_induced_subgraph(self, vertex_ids: list[int]) -> Hypergraph:
+    def get_vertex_induced_subhypergraph(self, vertex_ids: list[int]) -> Hypergraph:
         """Return the subhypergraph induced by the given vertex IDs."""
         arr = (_b._Id * len(vertex_ids))(*vertex_ids)
         out = ctypes.c_void_p()
@@ -750,7 +750,7 @@ class Hypergraph:
         )
         return self._wrap_handle(out)
 
-    def edge_induced_subgraph(self, hyperedge_ids: list[int]) -> Hypergraph:
+    def get_edge_induced_subhypergraph(self, hyperedge_ids: list[int]) -> Hypergraph:
         """Return the subhypergraph induced by the given hyperedge IDs."""
         arr = (_b._Id * len(hyperedge_ids))(*hyperedge_ids)
         out = ctypes.c_void_p()
@@ -762,13 +762,13 @@ class Hypergraph:
         )
         return self._wrap_handle(out)
 
-    def core(self, s: int, t: int) -> Hypergraph:
-        """Return the (s,t)-core: vertices with degree≥s, hyperedges with size≥t."""
+    def get_core(self, s: int, t: int) -> Hypergraph:
+        """Return the (s,t)-get_core: vertices with degree≥s, hyperedges with size≥t."""
         out = ctypes.c_void_p()
         raise_for_code(_lib.hgz_get_core(self._ptr, s, t, ctypes.byref(out)), _lib)
         return self._wrap_handle(out)
 
-    def transitive_closure(self) -> Hypergraph:
+    def get_transitive_closure(self) -> Hypergraph:
         """Return the transitive closure as a hypergraph."""
         out = ctypes.c_void_p()
         raise_for_code(_lib.hgz_get_transitive_closure(self._ptr, ctypes.byref(out)), _lib)

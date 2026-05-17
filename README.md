@@ -30,18 +30,18 @@ from hypergraphz import Hypergraph
 g = Hypergraph()
 
 # Add vertices and hyperedges
-alice = g.add_vertex({"name": "alice", "age": 30})
-bob   = g.add_vertex({"name": "bob",   "age": 25})
-carol = g.add_vertex({"name": "carol", "age": 35})
+alice = g.create_vertex({"name": "alice", "age": 30})
+bob   = g.create_vertex({"name": "bob",   "age": 25})
+carol = g.create_vertex({"name": "carol", "age": 35})
 
-collab = g.add_hyperedge({"type": "project"})
-g.connect(collab, [alice, bob, carol])
+collab = g.create_hyperedge({"type": "project"})
+g.append_vertices(collab, [alice, bob, carol])
 
 # Build the reverse index before querying
 g.build()
 
 # Shortest path
-path = g.shortest_path(alice, carol)
+path = g.find_shortest_path(alice, carol)
 
 # Fluent query builders
 active = (
@@ -51,13 +51,13 @@ active = (
 )
 
 # Structural algorithms
-scores, _, _ = g.page_rank()
-centrality    = g.centrality()
-components    = g.connected_components()
+scores, _, _ = g.compute_page_rank()
+centrality    = g.compute_centrality()
+components    = g.get_connected_components()
 
 # Sub-graph operations return independent Hypergraph objects
-sub = g.vertex_induced_subgraph([alice, bob])
-dual = g.dual()
+sub  = g.get_vertex_induced_subhypergraph([alice, bob])
+dual = g.get_dual()
 ```
 
 ### API summary
@@ -65,16 +65,16 @@ dual = g.dual()
 | Category | Methods |
 |---|---|
 | Lifecycle | `build()`, `clear()`, `save()`, `load()`, `clone()` |
-| Vertices | `add_vertex()`, `get_vertex()`, `update_vertex()`, `delete_vertex()`, `vertex_count()`, `all_vertex_ids()` |
-| Hyperedges | `add_hyperedge()`, `get_hyperedge()`, `update_hyperedge()`, `delete_hyperedge()`, `hyperedge_count()`, `all_hyperedge_ids()` |
-| Relations | `connect()`, `prepend()`, `insert_vertex()`, `insert_many()`, `disconnect()`, `disconnect_at()` |
-| Degree | `vertex_indegree()`, `vertex_outdegree()` |
-| Queries | `hyperedge_vertices()`, `vertex_hyperedges()`, `neighborhood()`, `intersections()`, `hyperedges_connecting()`, `endpoints()`, `orphan_vertices()`, `orphan_hyperedges()` |
+| Vertices | `create_vertex()`, `get_vertex()`, `update_vertex()`, `delete_vertex()`, `count_vertices()`, `get_all_vertex_ids()` |
+| Hyperedges | `create_hyperedge()`, `get_hyperedge()`, `update_hyperedge()`, `delete_hyperedge()`, `count_hyperedges()`, `get_all_hyperedge_ids()` |
+| Relations | `append_vertices()`, `prepend_vertices()`, `insert_vertex()`, `insert_vertices()`, `delete_vertex_from_hyperedge()`, `delete_vertex_at_index()` |
+| Degree | `get_vertex_indegree()`, `get_vertex_outdegree()` |
+| Queries | `get_hyperedge_vertices()`, `get_vertex_hyperedges()`, `get_vertex_neighborhood()`, `get_intersections()`, `get_hyperedges_connecting()`, `get_endpoints()`, `get_orphan_vertices()`, `get_orphan_hyperedges()` |
 | Boolean | `is_connected()`, `is_reachable()`, `has_cycle()`, `is_k_uniform()` |
-| Traversal | `shortest_path()`, `all_paths()`, `bfs()`, `dfs()`, `random_walk()` |
-| Algorithms | `connected_components()`, `topological_sort()`, `cut_vertices()`, `centrality()`, `page_rank()`, `inclusions()`, `nestedness_profile()` |
-| Matrices | `incidence_matrix()`, `incidence_matrix_coo()`, `laplacian()` |
-| Sub-graphs | `dual()`, `k_skeleton()`, `vertex_induced_subgraph()`, `edge_induced_subgraph()`, `core()`, `expand_to_graph()`, `expand_to_star()`, `line_graph()`, `transitive_closure()` |
+| Traversal | `find_shortest_path()`, `find_all_paths()`, `bfs()`, `dfs()`, `random_walk()` |
+| Algorithms | `get_connected_components()`, `topological_sort()`, `find_cut_vertices()`, `compute_centrality()`, `compute_page_rank()`, `get_inclusions()`, `get_nestedness_profile()` |
+| Matrices | `to_incidence_matrix()`, `to_incidence_matrix_coo()`, `to_laplacian()` |
+| Sub-graphs | `get_dual()`, `get_k_skeleton()`, `get_vertex_induced_subhypergraph()`, `get_edge_induced_subhypergraph()`, `get_core()`, `expand_to_graph()`, `expand_to_star()`, `get_line_graph()`, `get_transitive_closure()` |
 | Fluent builders | `vertices()` → `VertexQuery`, `hyperedges()` → `HyperedgeQuery` |
 
 ### Exceptions

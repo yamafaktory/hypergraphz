@@ -8,12 +8,12 @@ from hypergraphz import Hypergraph
 @pytest.fixture
 def labeled_graph() -> Hypergraph:
     g = Hypergraph()
-    g.add_vertex({"name": "alice", "age": 30, "active": True})
-    g.add_vertex({"name": "bob", "age": 25, "active": False})
-    g.add_vertex({"name": "carol", "age": 35, "active": True})
-    e = g.add_hyperedge({"type": "collab"})
-    ids = g.all_vertex_ids()
-    g.connect(e, ids)
+    g.create_vertex({"name": "alice", "age": 30, "active": True})
+    g.create_vertex({"name": "bob", "age": 25, "active": False})
+    g.create_vertex({"name": "carol", "age": 35, "active": True})
+    e = g.create_hyperedge({"type": "collab"})
+    ids = g.get_all_vertex_ids()
+    g.append_vertices(e, ids)
     g.build()
     return g
 
@@ -77,10 +77,10 @@ def test_hyperedges_containing(labeled_graph):
 
 def test_hyperedges_limit(labeled_graph):
     g = Hypergraph()
-    g.add_vertex({})
-    e1 = g.add_hyperedge({"n": 1})
-    e2 = g.add_hyperedge({"n": 2})
-    g.add_hyperedge({"n": 3})
+    g.create_vertex({})
+    e1 = g.create_hyperedge({"n": 1})
+    e2 = g.create_hyperedge({"n": 2})
+    g.create_hyperedge({"n": 3})
     g.build()
     ids = g.hyperedges().limit(2).ids()
     assert len(ids) == 2

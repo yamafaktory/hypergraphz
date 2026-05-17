@@ -9,13 +9,13 @@ from hypergraphz import Hypergraph, IndexOutOfBoundsError
 def chain() -> tuple[Hypergraph, list[int], list[int]]:
     """Linear chain: va→vb via e1, vb→vc via e2."""
     g = Hypergraph()
-    va = g.add_vertex({"n": "a"})
-    vb = g.add_vertex({"n": "b"})
-    vc = g.add_vertex({"n": "c"})
-    e1 = g.add_hyperedge({"w": 1})
-    e2 = g.add_hyperedge({"w": 1})
-    g.connect(e1, [va, vb])
-    g.connect(e2, [vb, vc])
+    va = g.create_vertex({"n": "a"})
+    vb = g.create_vertex({"n": "b"})
+    vc = g.create_vertex({"n": "c"})
+    e1 = g.create_hyperedge({"w": 1})
+    e2 = g.create_hyperedge({"w": 1})
+    g.append_vertices(e1, [va, vb])
+    g.append_vertices(e2, [vb, vc])
     g.build()
     return g, [va, vb, vc], [e1, e2]
 
@@ -26,17 +26,17 @@ def chain() -> tuple[Hypergraph, list[int], list[int]]:
 def test_vertex_indegree(chain):
     g, vids, _ = chain
     va, vb, vc = vids
-    assert g.vertex_indegree(va) == 0
-    assert g.vertex_indegree(vb) == 1
-    assert g.vertex_indegree(vc) == 1
+    assert g.get_vertex_indegree(va) == 0
+    assert g.get_vertex_indegree(vb) == 1
+    assert g.get_vertex_indegree(vc) == 1
 
 
 def test_vertex_outdegree(chain):
     g, vids, _ = chain
     va, vb, vc = vids
-    assert g.vertex_outdegree(va) == 1
-    assert g.vertex_outdegree(vb) == 1
-    assert g.vertex_outdegree(vc) == 0
+    assert g.get_vertex_outdegree(va) == 1
+    assert g.get_vertex_outdegree(vb) == 1
+    assert g.get_vertex_outdegree(vc) == 0
 
 
 # ── Boolean queries ───────────────────────────────────────────────────────────
@@ -58,12 +58,12 @@ def test_has_cycle_false(chain):
 
 def test_has_cycle_true():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    e1 = g.add_hyperedge({})
-    e2 = g.add_hyperedge({})
-    g.connect(e1, [va, vb])
-    g.connect(e2, [vb, va])
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    e1 = g.create_hyperedge({})
+    e2 = g.create_hyperedge({})
+    g.append_vertices(e1, [va, vb])
+    g.append_vertices(e2, [vb, va])
     g.build()
     assert g.has_cycle() is True
 
@@ -105,23 +105,23 @@ def test_random_walk_length(chain):
 
 def test_orphan_vertices():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    e = g.add_hyperedge({})
-    g.connect(e, [va])
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    e = g.create_hyperedge({})
+    g.append_vertices(e, [va])
     g.build()
-    orphans = g.orphan_vertices()
+    orphans = g.get_orphan_vertices()
     assert orphans == [vb]
 
 
 def test_orphan_hyperedges():
     g = Hypergraph()
-    g.add_vertex({})
-    e1 = g.add_hyperedge({})
-    e2 = g.add_hyperedge({})
-    g.connect(e1, [g.all_vertex_ids()[0]])
+    g.create_vertex({})
+    e1 = g.create_hyperedge({})
+    e2 = g.create_hyperedge({})
+    g.append_vertices(e1, [g.get_all_vertex_ids()[0]])
     g.build()
-    orphans = g.orphan_hyperedges()
+    orphans = g.get_orphan_hyperedges()
     assert orphans == [e2]
 
 
@@ -130,19 +130,19 @@ def test_orphan_hyperedges():
 
 def test_intersections(chain):
     g, vids, eids = chain
-    common = g.intersections(eids)
+    common = g.get_intersections(eids)
     assert common == [vids[1]]
 
 
 def test_hyperedges_connecting(chain):
     g, vids, eids = chain
-    connecting = g.hyperedges_connecting(vids[0], vids[1])
+    connecting = g.get_hyperedges_connecting(vids[0], vids[1])
     assert connecting == [eids[0]]
 
 
 def test_hyperedges_connecting_none(chain):
     g, vids, _ = chain
-    connecting = g.hyperedges_connecting(vids[0], vids[2])
+    connecting = g.get_hyperedges_connecting(vids[0], vids[2])
     assert connecting == []
 
 
@@ -151,7 +151,7 @@ def test_hyperedges_connecting_none(chain):
 
 def test_endpoints(chain):
     g, vids, eids = chain
-    initial, terminal = g.endpoints()
+    initial, terminal = g.get_endpoints()
     initial_vids = [v for _, v in initial]
     terminal_vids = [v for _, v in terminal]
     assert vids[0] in initial_vids
@@ -163,66 +163,66 @@ def test_endpoints(chain):
 
 def test_prepend():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    vc = g.add_vertex({})
-    e = g.add_hyperedge({})
-    g.connect(e, [vb, vc])
-    g.prepend(e, [va])
-    assert g.hyperedge_vertices(e) == [va, vb, vc]
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    vc = g.create_vertex({})
+    e = g.create_hyperedge({})
+    g.append_vertices(e, [vb, vc])
+    g.prepend_vertices(e, [va])
+    assert g.get_hyperedge_vertices(e) == [va, vb, vc]
 
 
 def test_insert_vertex():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    vc = g.add_vertex({})
-    e = g.add_hyperedge({})
-    g.connect(e, [va, vc])
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    vc = g.create_vertex({})
+    e = g.create_hyperedge({})
+    g.append_vertices(e, [va, vc])
     g.insert_vertex(e, vb, 1)
-    assert g.hyperedge_vertices(e) == [va, vb, vc]
+    assert g.get_hyperedge_vertices(e) == [va, vb, vc]
 
 
 def test_insert_many():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    vc = g.add_vertex({})
-    vd = g.add_vertex({})
-    e = g.add_hyperedge({})
-    g.connect(e, [va, vd])
-    g.insert_many(e, [vb, vc], 1)
-    assert g.hyperedge_vertices(e) == [va, vb, vc, vd]
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    vc = g.create_vertex({})
+    vd = g.create_vertex({})
+    e = g.create_hyperedge({})
+    g.append_vertices(e, [va, vd])
+    g.insert_vertices(e, [vb, vc], 1)
+    assert g.get_hyperedge_vertices(e) == [va, vb, vc, vd]
 
 
 def test_disconnect():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    e = g.add_hyperedge({})
-    g.connect(e, [va, vb])
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    e = g.create_hyperedge({})
+    g.append_vertices(e, [va, vb])
     g.build()
-    g.disconnect(e, va)
-    assert g.hyperedge_vertices(e) == [vb]
+    g.delete_vertex_from_hyperedge(e, va)
+    assert g.get_hyperedge_vertices(e) == [vb]
 
 
 def test_disconnect_at():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    e = g.add_hyperedge({})
-    g.connect(e, [va, vb])
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    e = g.create_hyperedge({})
+    g.append_vertices(e, [va, vb])
     g.build()
-    g.disconnect_at(e, 0)
-    assert g.hyperedge_vertices(e) == [vb]
+    g.delete_vertex_at_index(e, 0)
+    assert g.get_hyperedge_vertices(e) == [vb]
 
 
 def test_insert_vertex_out_of_bounds():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    e = g.add_hyperedge({})
-    g.connect(e, [va])
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    e = g.create_hyperedge({})
+    g.append_vertices(e, [va])
     with pytest.raises(IndexOutOfBoundsError):
         g.insert_vertex(e, vb, 99)
 
@@ -232,7 +232,7 @@ def test_insert_vertex_out_of_bounds():
 
 def test_centrality_keys(chain):
     g, vids, _ = chain
-    result = g.centrality()
+    result = g.compute_centrality()
     assert set(result.keys()) == set(vids)
     for v in vids:
         assert "degree" in result[v]
@@ -242,7 +242,7 @@ def test_centrality_keys(chain):
 
 def test_centrality_degree_values(chain):
     g, vids, _ = chain
-    result = g.centrality()
+    result = g.compute_centrality()
     assert result[vids[1]]["degree"] >= result[vids[0]]["degree"]
 
 
@@ -251,7 +251,7 @@ def test_centrality_degree_values(chain):
 
 def test_page_rank_returns_all_vertices(chain):
     g, vids, _ = chain
-    scores, iterations, converged = g.page_rank()
+    scores, iterations, converged = g.compute_page_rank()
     assert set(scores.keys()) == set(vids)
     assert iterations > 0
     assert converged is True
@@ -259,7 +259,7 @@ def test_page_rank_returns_all_vertices(chain):
 
 def test_page_rank_scores_sum_to_one(chain):
     g, vids, _ = chain
-    scores, _, _ = g.page_rank()
+    scores, _, _ = g.compute_page_rank()
     total = sum(scores.values())
     assert abs(total - 1.0) < 1e-6
 
@@ -269,20 +269,20 @@ def test_page_rank_scores_sum_to_one(chain):
 
 def test_inclusions_subset():
     g = Hypergraph()
-    va = g.add_vertex({})
-    vb = g.add_vertex({})
-    e1 = g.add_hyperedge({})
-    e2 = g.add_hyperedge({})
-    g.connect(e1, [va])
-    g.connect(e2, [va, vb])
+    va = g.create_vertex({})
+    vb = g.create_vertex({})
+    e1 = g.create_hyperedge({})
+    e2 = g.create_hyperedge({})
+    g.append_vertices(e1, [va])
+    g.append_vertices(e2, [va, vb])
     g.build()
-    pairs = g.inclusions()
+    pairs = g.get_inclusions()
     assert (e1, e2) in pairs
 
 
 def test_inclusions_empty_when_no_subset(chain):
     g, _, _ = chain
-    pairs = g.inclusions()
+    pairs = g.get_inclusions()
     assert pairs == []
 
 
@@ -291,7 +291,7 @@ def test_inclusions_empty_when_no_subset(chain):
 
 def test_nestedness_profile_structure(chain):
     g, _, _ = chain
-    profile = g.nestedness_profile()
+    profile = g.get_nestedness_profile()
     assert isinstance(profile, list)
     for entry in profile:
         assert "size" in entry
@@ -304,7 +304,7 @@ def test_nestedness_profile_structure(chain):
 
 def test_incidence_matrix_shape(chain):
     g, vids, eids = chain
-    m = g.incidence_matrix()
+    m = g.to_incidence_matrix()
     assert len(m["vertex_ids"]) == len(vids)
     assert len(m["hyperedge_ids"]) == len(eids)
     assert len(m["data"]) == len(vids)
@@ -313,7 +313,7 @@ def test_incidence_matrix_shape(chain):
 
 def test_incidence_matrix_values(chain):
     g, vids, eids = chain
-    m = g.incidence_matrix()
+    m = g.to_incidence_matrix()
     row_map = {v: i for i, v in enumerate(m["vertex_ids"])}
     col_map = {e: j for j, e in enumerate(m["hyperedge_ids"])}
     assert m["data"][row_map[vids[0]]][col_map[eids[0]]] == 1
@@ -322,7 +322,7 @@ def test_incidence_matrix_values(chain):
 
 def test_incidence_matrix_coo(chain):
     g, vids, eids = chain
-    coo = g.incidence_matrix_coo()
+    coo = g.to_incidence_matrix_coo()
     assert len(coo["rows"]) == len(coo["cols"])
     assert len(coo["vertex_ids"]) == len(vids)
     assert len(coo["hyperedge_ids"]) == len(eids)
@@ -334,7 +334,7 @@ def test_incidence_matrix_coo(chain):
 
 def test_laplacian_shape(chain):
     g, vids, _ = chain
-    lap = g.laplacian()
+    lap = g.to_laplacian()
     n = len(vids)
     assert len(lap["vertex_ids"]) == n
     assert len(lap["data"]) == n
@@ -343,7 +343,7 @@ def test_laplacian_shape(chain):
 
 def test_laplacian_unnormalized(chain):
     g, _, _ = chain
-    lap = g.laplacian(normalized=False)
+    lap = g.to_laplacian(normalized=False)
     assert isinstance(lap["data"], list)
 
 
@@ -352,7 +352,7 @@ def test_laplacian_unnormalized(chain):
 
 def test_all_paths_finds_path(chain):
     g, vids, _ = chain
-    paths = g.all_paths(vids[0], vids[2])
+    paths = g.find_all_paths(vids[0], vids[2])
     assert len(paths) >= 1
     for path in paths:
         assert path[0] == vids[0]
@@ -361,5 +361,5 @@ def test_all_paths_finds_path(chain):
 
 def test_all_paths_no_path(chain):
     g, vids, _ = chain
-    paths = g.all_paths(vids[2], vids[0])
+    paths = g.find_all_paths(vids[2], vids[0])
     assert paths == []

@@ -134,6 +134,20 @@ The Python package lives in `python/hypergraphz/` and wraps the C ABI layer (`sr
 
 The shared library (`libhypergraphz.so` / `.dylib` / `.dll`) must be placed inside `python/hypergraphz/` for `_binding.py` to find it. Use `just install-py` to build and copy it.
 
+### Python API naming convention
+
+**Python method names must be the exact `snake_case` conversion of the Zig method name.** No shortening, no dropping of verb prefixes, no invented names. Examples:
+
+| Zig | Python |
+|---|---|
+| `appendVertices` | `append_vertices` |
+| `findShortestPath` | `find_shortest_path` |
+| `computeCentrality` | `compute_centrality` |
+| `getVertexInducedSubhypergraph` | `get_vertex_induced_subhypergraph` |
+| `deleteVertexFromHyperedge` | `delete_vertex_from_hyperedge` |
+
+If a Zig method is renamed, the Python method must be renamed to match in the same commit. Never invent a Python name that doesn't trace directly to a Zig method name.
+
 Python tests live in `tests-python/`, split across:
 - `test_core.py` — lifecycle, CRUD, basic traversal
 - `test_query.py` — fluent `VertexQuery` / `HyperedgeQuery`

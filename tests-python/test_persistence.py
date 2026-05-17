@@ -10,13 +10,13 @@ from hypergraphz import Hypergraph
 
 def _build_graph() -> tuple[Hypergraph, list[int], list[int]]:
     g = Hypergraph()
-    va = g.add_vertex({"name": "a"})
-    vb = g.add_vertex({"name": "b"})
-    vc = g.add_vertex({"name": "c"})
-    e1 = g.add_hyperedge({"label": "e1"})
-    e2 = g.add_hyperedge({"label": "e2"})
-    g.connect(e1, [va, vb])
-    g.connect(e2, [vb, vc])
+    va = g.create_vertex({"name": "a"})
+    vb = g.create_vertex({"name": "b"})
+    vc = g.create_vertex({"name": "c"})
+    e1 = g.create_hyperedge({"label": "e1"})
+    e2 = g.create_hyperedge({"label": "e2"})
+    g.append_vertices(e1, [va, vb])
+    g.append_vertices(e2, [vb, vc])
     g.build()
     return g, [va, vb, vc], [e1, e2]
 
@@ -29,7 +29,7 @@ def test_save_and_load_vertex_data():
         g.save(path)
         g2 = Hypergraph.load(path)
         g2.build()
-        assert g2.vertex_count() == 3
+        assert g2.count_vertices() == 3
         for vid in vids:
             assert g2.get_vertex(vid) == g.get_vertex(vid)
     finally:
@@ -44,7 +44,7 @@ def test_save_and_load_hyperedge_data():
         g.save(path)
         g2 = Hypergraph.load(path)
         g2.build()
-        assert g2.hyperedge_count() == 2
+        assert g2.count_hyperedges() == 2
         for eid in eids:
             assert g2.get_hyperedge(eid) == g.get_hyperedge(eid)
     finally:
@@ -59,8 +59,8 @@ def test_save_and_load_relations():
         g.save(path)
         g2 = Hypergraph.load(path)
         g2.build()
-        assert g2.hyperedge_vertices(eids[0]) == [vids[0], vids[1]]
-        assert g2.hyperedge_vertices(eids[1]) == [vids[1], vids[2]]
+        assert g2.get_hyperedge_vertices(eids[0]) == [vids[0], vids[1]]
+        assert g2.get_hyperedge_vertices(eids[1]) == [vids[1], vids[2]]
     finally:
         path.unlink(missing_ok=True)
 
@@ -73,7 +73,7 @@ def test_save_and_load_connectivity():
         g.save(path)
         g2 = Hypergraph.load(path)
         g2.build()
-        path2 = g2.shortest_path(vids[0], vids[2])
+        path2 = g2.find_shortest_path(vids[0], vids[2])
         assert path2 is not None
         assert path2[0] == vids[0]
         assert path2[-1] == vids[2]
