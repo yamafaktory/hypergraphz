@@ -41,7 +41,7 @@ jobs:
         with:
           version: "0.17.0-dev.242+5d55999d2"
 
-      # Linux: cibuildwheel runs inside manylinux container; install Zig there
+      # Linux: cibuildwheel runs inside manylinux container; install Zig there via symlink
       - name: Build wheels (Linux)
         if: runner.os == 'Linux'
         uses: pypa/cibuildwheel@v2.22.0
@@ -50,8 +50,7 @@ jobs:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BEFORE_ALL: |
             curl -fsSL ${{ matrix.zig_url }} | tar xJ -C /opt
-            echo "export PATH=/opt/${{ matrix.zig_dir }}:\$PATH" >> /etc/environment
-          CIBW_ENVIRONMENT: PATH=/opt/${{ matrix.zig_dir }}:$PATH
+            ln -s /opt/${{ matrix.zig_dir }}/zig /usr/local/bin/zig
 
       - name: Build wheels (macOS / Windows)
         if: runner.os != 'Linux'

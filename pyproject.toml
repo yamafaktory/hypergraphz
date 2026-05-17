@@ -51,6 +51,9 @@ environment = { PATH = "/opt/zig-linux-x86_64-0.17.0-dev.242+5d55999d2:$PATH" }
 [tool.cibuildwheel.macos]
 environment = { MACOSX_DEPLOYMENT_TARGET = "11.0" }
 
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]
+
 [tool.ruff]
 src = ["python"]
 line-length = 100

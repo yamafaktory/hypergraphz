@@ -6,6 +6,8 @@ from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
+ROOT = Path(__file__).parent
+
 
 class CustomBuildHook(BuildHookInterface):
     def initialize(self, version, build_data):
@@ -15,10 +17,11 @@ class CustomBuildHook(BuildHookInterface):
         subprocess.run(
             ["zig", "build", "lib", "-Doptimize=ReleaseFast"],
             check=True,
+            cwd=ROOT,
         )
 
-        lib_dir = Path("zig-out/lib")
-        pkg_dir = Path("python/hypergraphz")
+        lib_dir = ROOT / "zig-out" / "lib"
+        pkg_dir = ROOT / "python" / "hypergraphz"
 
         copied = False
         for pattern in ("libhypergraphz.so", "libhypergraphz.dylib", "hypergraphz.dll"):
