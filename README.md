@@ -1,12 +1,34 @@
-# HypergraphZ - A Hypergraph Implementation in Zig
+# HypergraphZ
 
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/yamafaktory/hypergraphz/ci.yml?branch=main&style=flat-square)
 ![PyPI](https://img.shields.io/pypi/v/hypergraphz?style=flat-square)
 
-HypergraphZ is a directed hypergraph implementation in Zig (https://en.wikipedia.org/wiki/Hypergraph):
+A fast, directed [hypergraph](https://en.wikipedia.org/wiki/Hypergraph) library written in Zig, with Python bindings included.
 
-- Each hyperedge can contain zero, one (unary) or multiple vertices.
-- Each hyperedge can contain vertices directed to themselves one or more times.
+In a regular graph an edge connects exactly two nodes. A **hyperedge** connects *any number* of vertices at once — making hypergraphs a natural fit wherever relationships involve more than two parties:
+
+| Domain | Vertices | Hyperedges |
+|---|---|---|
+| Academia | researchers | papers (all co-authors at once) |
+| Biology | proteins | complexes, metabolic pathways |
+| Chemistry | molecules | reactions (multiple reactants → products) |
+| Finance | accounts | transactions (split payments, settlements) |
+| Software | packages | commits, dependency sets |
+| Networks | devices | multicast groups, subnets |
+| Social | people | group chats, events, committees |
+| Knowledge | concepts | ontology relations, semantic clusters |
+| Logistics | locations | routes, shared shipments |
+| ML / AI | features | co-occurrence sets, hypergraph neural nets |
+
+HypergraphZ adds **directed** semantics on top: consecutive vertex pairs within a hyperedge define a direction, enabling shortest-path queries, topological sort, and reachability over the same structure.
+
+**Highlights**
+
+- Hyperedges can span zero, one, or many vertices — including self-loops and duplicates
+- Full algorithm suite: BFS/DFS, shortest path, PageRank, centrality, cut vertices, connected components, topological sort, transitive closure
+- Structural operations: dual, k-skeleton, line graph, star/clique expansion, incidence matrix, Laplacian
+- Python wheels ship a precompiled Zig core — no compiler needed at install time
+- Bulk insertion API (`create_vertices`, `create_hyperedges`) cuts Python FFI overhead ~10×
 
 ---
 
