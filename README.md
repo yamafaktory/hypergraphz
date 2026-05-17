@@ -180,7 +180,7 @@ Benchmarks run with `zig build bench -Doptimize=ReleaseFast` on an **Intel Core 
 |---|---|
 | `createVertex` per vertex (atomic) | 77.7 ms |
 | `createVertex` per vertex + `appendVerticesToHyperedge` (batch append) | 70.4 ms |
-| `createVertices` (bulk, single call per hyperedge) | **47.6 ms** |
+| `createHyperedges` + `createVertices` (bulk, single call each) | **47.6 ms** |
 | `build()` — construct reverse index over all 1,000,000 vertices | 227.8 ms |
 
 #### Queries (chain / shared-vertex graphs, after `build()`)
