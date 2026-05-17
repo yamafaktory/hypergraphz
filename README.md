@@ -1,6 +1,7 @@
 # HypergraphZ - A Hypergraph Implementation in Zig
 
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/yamafaktory/hypergraphz/ci.yml?branch=main&style=flat-square)
+![PyPI](https://img.shields.io/pypi/v/hypergraphz?style=flat-square)
 
 HypergraphZ is a directed hypergraph implementation in Zig (https://en.wikipedia.org/wiki/Hypergraph):
 
