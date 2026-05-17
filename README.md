@@ -12,6 +12,24 @@ HypergraphZ is a directed hypergraph implementation in Zig (https://en.wikipedia
 
 ## For Python users
 
+### How it works
+
+The Python package is a thin binding over the same Zig core used by the native library — there is no Python reimplementation of the graph logic.
+
+```
+┌─────────────────────────────┐
+│  Python (hypergraphz)       │  high-level API — Hypergraph, VertexQuery, …
+├─────────────────────────────┤
+│  ctypes                     │  FFI bridge — no C extension, no compilation step for users
+├─────────────────────────────┤
+│  C ABI (hgz_c_api.zig)      │  flat exported functions — hgz_add_vertex, hgz_find_shortest_path, …
+├─────────────────────────────┤
+│  HypergraphZ (Zig core)     │  all algorithms, memory management, type-safe generics
+└─────────────────────────────┘
+```
+
+The shared library (`libhypergraphz.so` / `.dylib` / `.dll`) is compiled once and shipped inside the wheel. Data crosses the boundary as JSON (vertex and hyperedge payloads) and as plain integer ID arrays (all structural operations). For bulk insertion, `create_vertices` and `create_hyperedges` serialise an entire payload list in one call, reducing FFI crossings from N to 1 — see [Performance](#performance-1) below.
+
 ### Installation
 
 ```sh
