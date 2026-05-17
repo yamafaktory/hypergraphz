@@ -101,9 +101,9 @@ Benchmarks run with `pytest-benchmark` on an **Intel Core i9-13900H, 64 GB RAM, 
 |---|---|---|
 | `create_vertex` per vertex (atomic) | ~4,095 ms | 1× |
 | `create_vertex` per vertex + `append_vertices` (batch append) | ~2,554 ms | 1.6× |
-| `create_vertices` (bulk, single FFI call per hyperedge) | **~415 ms** | **~10×** |
+| `create_hyperedges` + `create_vertices` (bulk, single FFI call each) | **~415 ms** | **~10×** |
 
-The dominant cost in the atomic and batch cases is ctypes call overhead (~1–2 µs per crossing). `create_vertices` reduces 1,000 FFI crossings per hyperedge to one, serialising the entire payload list as a single JSON array.
+The dominant cost in the atomic and batch cases is ctypes call overhead (~1–2 µs per crossing). `create_hyperedges` and `create_vertices` each replace a per-item loop with a single FFI call, serialising the entire payload list as one JSON array.
 
 #### Queries (chain / shared-vertex graphs, after `build()`)
 

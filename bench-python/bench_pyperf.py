@@ -56,31 +56,14 @@ runner.bench_time_func(
 
 
 # ---------------------------------------------------------------------------
-# Bench 1c: bulk create_vertices — single FFI call per hyperedge
-# (compare with atomic and batch above to see FFI overhead)
+# Bench 1c: bulk insertions via create_hyperedges + create_vertices
+# (compare with atomic and batch above to see FFI overhead eliminated)
 # ---------------------------------------------------------------------------
 _v_payloads = [{}] * 1_000
 _h_payloads = [{}] * 1_000
 
 
-def bench_bulk_create_vertices(loops):
-    elapsed = pyperf.perf_counter()
-    for _ in range(loops):
-        g = Hypergraph()
-        for _ in range(1_000):
-            h = g.create_hyperedge({})
-            vertices = g.create_vertices(_v_payloads)
-            g.append_vertices(h, vertices)
-    return pyperf.perf_counter() - elapsed
-
-
-runner.bench_time_func(
-    "1_000 hyperedges × 1_000 vertices (bulk create_vertices)",
-    bench_bulk_create_vertices,
-)
-
-
-def bench_bulk_create_both(loops):
+def bench_bulk_insertions(loops):
     elapsed = pyperf.perf_counter()
     for _ in range(loops):
         g = Hypergraph()
@@ -92,8 +75,8 @@ def bench_bulk_create_both(loops):
 
 
 runner.bench_time_func(
-    "1_000 hyperedges × 1_000 vertices (bulk create_vertices + create_hyperedges)",
-    bench_bulk_create_both,
+    "1_000 hyperedges × 1_000 vertices (bulk create_hyperedges + create_vertices)",
+    bench_bulk_insertions,
 )
 
 

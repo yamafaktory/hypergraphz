@@ -35,23 +35,11 @@ def test_batch_insertions(benchmark):
 
 
 # ---------------------------------------------------------------------------
-# Bench 1b: bulk insertions via create_vertices — single FFI call per hyperedge
+# Bench 1b: bulk insertions via create_hyperedges + create_vertices
+# Single FFI call for all hyperedges, single FFI call per hyperedge for vertices
 # (compare with test_atomic_insertions and test_batch_insertions above)
 # ---------------------------------------------------------------------------
-def test_bulk_create_vertices(benchmark):
-    payloads = [{}] * 1_000
-
-    def run():
-        g = Hypergraph()
-        for _ in range(1_000):
-            h = g.create_hyperedge({})
-            vertices = g.create_vertices(payloads)
-            g.append_vertices(h, vertices)
-
-    benchmark(run)
-
-
-def test_bulk_create_hyperedges_and_vertices(benchmark):
+def test_bulk_insertions(benchmark):
     v_payloads = [{}] * 1_000
     h_payloads = [{}] * 1_000
 
