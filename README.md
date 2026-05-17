@@ -91,6 +91,28 @@ All errors map to typed exceptions from `hypergraphz`:
 | `IndexOutOfBoundsError` | Insertion index out of range |
 | `NotEnoughVerticesError` | Operation needs more vertices |
 
+### Performance
+
+Benchmarks run with `pytest-benchmark` on an **Intel Core i9-13900H, 64 GB RAM, CachyOS Linux (kernel 7.0.5)**, `ReleaseFast` shared library, Python 3.14.
+
+#### Insertion — 1,000 hyperedges × 1,000 vertices
+
+| API | Mean | vs atomic |
+|---|---|---|
+| `create_vertex` per vertex (atomic) | ~4,095 ms | 1× |
+| `create_vertex` per vertex + `append_vertices` (batch append) | ~2,554 ms | 1.6× |
+| `create_vertices` (bulk, single FFI call per hyperedge) | **~415 ms** | **~10×** |
+
+The dominant cost in the atomic and batch cases is ctypes call overhead (~1–2 µs per crossing). `create_vertices` reduces 1,000 FFI crossings per hyperedge to one, serialising the entire payload list as a single JSON array.
+
+#### Queries (chain / shared-vertex graphs, after `build()`)
+
+| Operation | Mean |
+|---|---|
+| `find_shortest_path` — chain of 1,000 vertices | ~148 µs |
+| `find_cut_vertices` — chain of 1,000 vertices | ~351 µs |
+| `get_vertex_indegree` × 100 — each vertex in 1,000 hyperedges | ~4.7 ms |
+
 ---
 
 ## For Zig users
@@ -147,6 +169,27 @@ It walks through seventeen features of the library in sequence:
 | K-core decomposition     | `getCore`                | (s, t)-core peeling; trims the lone-paper researcher         |
 | Nestedness               | `getInclusions`          | strict-subset pairs across hyperedges; sized profile         |
 | Co-author neighborhoods  | `getVertexNeighborhood`  | undirected co-occurrence neighbors across all hyperedges     |
+
+### Performance
+
+Benchmarks run with `zig build bench -Doptimize=ReleaseFast` on an **Intel Core i9-13900H, 64 GB RAM, CachyOS Linux (kernel 7.0.5)**.
+
+#### Insertion — 1,000 hyperedges × 1,000 vertices
+
+| API | Time |
+|---|---|
+| `createVertex` per vertex (atomic) | 77.7 ms |
+| `createVertex` per vertex + `appendVerticesToHyperedge` (batch append) | 70.4 ms |
+| `createVertices` (bulk, single call per hyperedge) | **47.6 ms** |
+| `build()` — construct reverse index over all 1,000,000 vertices | 227.8 ms |
+
+#### Queries (chain / shared-vertex graphs, after `build()`)
+
+| Operation | Time |
+|---|---|
+| `getVertexIndegree` × 100 — each vertex in 1,000 hyperedges | 422 µs |
+| `findShortestPath` — chain of 1,000 vertices | 232 µs |
+| `findCutVertices` — chain of 1,000 vertices | 414 µs |
 
 ---
 

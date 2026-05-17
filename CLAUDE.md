@@ -128,6 +128,25 @@ When adding a new algorithm, explicitly decide which semantics it uses and docum
 
 Use `debugAt(@src(), "message {}", .{arg})` (not `std.log.debug`) for all internal trace output. This emits under the `.hypergraphz` log scope and is gated by the `log_level` variable in non-test builds and by `std.testing.log_level` in test builds.
 
+### Keeping README performance sections in sync
+
+`README.md` contains two **Performance** sections — one under "For Python users" and one under "For Zig users" — with concrete benchmark numbers and system info. These must be kept in sync whenever:
+
+- A new algorithm or method is added that has a bench scenario
+- An existing bench scenario is changed (different graph sizes, different API)
+- A bulk/batch API is added that changes the insertion comparison table
+- A significant performance regression or improvement is observed
+
+After running the benches, update both tables with the new numbers. Also record the machine used (CPU model, RAM, OS, kernel). The bench commands:
+
+```bash
+just bench-zig         # Zig — prints raw timings to stdout
+just bench-pytest      # Python — quick table (use -k to filter)
+just bench-py          # Python — statistical pyperf run
+```
+
+Do not update the README numbers from `--fast` pyperf runs or single-round pytest runs — use at least `--benchmark-min-rounds=2` for pytest and a full pyperf run (no `--fast`) for published numbers.
+
 ### Before committing Python changes
 
 Always run lint and format before committing any Python changes:
