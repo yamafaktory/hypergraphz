@@ -1,7 +1,7 @@
 //! Benchmarks for HypergraphZ.
 
 const std = @import("std");
-const hypergraphz = @import("hypergraphz.zig");
+const hypergraphz = @import("hypergraphz");
 
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
@@ -156,7 +156,32 @@ pub fn main() !void {
         try bench.end();
     }
 
-    // Bench 5: build() on 1_000 hyperedges with 1_000 vertices each.
+    // Bench 5: findCutVertices on a chain of 1_000 vertices.
+    // Every interior vertex is a cut vertex (998 expected).
+    {
+        var bench: Bench = try .init(
+            allocator,
+            "findCutVertices on a chain of 1_000 vertices",
+            .{ .vertices_capacity = 1_000, .hyperedges_capacity = 999 },
+        );
+        defer bench.deinit();
+
+        // Setup (not timed): build the chain.
+        var chain: [1_000]HypergraphZId = undefined;
+        for (&chain) |*v| v.* = try bench.graph.createVertexAssumeCapacity(.{});
+        for (0..999) |i| {
+            const e = try bench.graph.createHyperedgeAssumeCapacity(.{});
+            try bench.graph.appendVerticesToHyperedge(e, &.{ chain[i], chain[i + 1] });
+        }
+        try bench.graph.build();
+        bench.resetTimer();
+
+        const cuts = try bench.graph.findCutVertices();
+        allocator.free(cuts);
+        try bench.end();
+    }
+
+    // Bench 7: build() on 1_000 hyperedges with 1_000 vertices each.
     {
         var bench: Bench = try .init(
             allocator,

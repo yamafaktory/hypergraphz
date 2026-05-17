@@ -2736,6 +2736,178 @@ pub fn HypergraphZ(comptime H: type, comptime V: type, comptime options: Hypergr
             return result;
         }
 
+        /// Return the set of cut vertices (articulation points): vertices whose
+        /// removal would increase the number of (undirected) connected
+        /// components. Equivalently, the `k = 1` case of the vertex separator
+        /// concept formalized for hypergraphs in Hood, "Hypergraphs without
+        /// Subgraphs of Given Connectivity", arXiv 2604.17038.
+        ///
+        /// Hyperedges are treated as undirected vertex sets — each hyperedge
+        /// contributes a clique among its distinct vertices. This matches the
+        /// standard hypergraph-connectivity definition (any two vertices in
+        /// the same hyperedge are adjacent) used by `toLaplacian`,
+        /// `computePageRank`, `getInclusions`, and `getVertexNeighborhood`.
+        /// Note this differs from the directed window-pair semantics used by
+        /// `breadthFirstSearch` / `depthFirstSearch` / `isConnected`, so a
+        /// vertex listed in the middle of a long hyperedge is *not*
+        /// automatically a cut vertex.
+        ///
+        /// Algorithm: classical Hopcroft–Tarjan DFS lowlink, run iteratively
+        /// (the recursion depth on hypergraphs can exceed thread-stack
+        /// limits on dense data). For a vertex `u`:
+        ///   - if `u` is a DFS-tree root, it is a cut vertex iff it has ≥ 2
+        ///     tree children;
+        ///   - otherwise, it is a cut vertex iff some tree child `c`
+        ///     satisfies `low(c) ≥ disc(u)`.
+        /// The DFS is restarted on each unvisited vertex to handle multiple
+        /// connected components.
+        ///
+        /// Reference: Hopcroft & Tarjan, "Efficient algorithms for graph
+        /// manipulation", CACM 16(6), 1973. The hypergraph extension is
+        /// straightforward via the clique-expansion adjacency.
+        ///
+        /// Complexity: `O(V + Σ_v deg(v)·max_e_size)` for neighborhood
+        /// materialization, plus `O(V + neighborhood_total)` for the DFS.
+        ///
+        /// The caller is responsible for freeing the result with
+        /// `graph.allocator.free(result)`.
+        pub fn findCutVertices(self: *Self) HypergraphZError![]const HypergraphZId {
+            if (!self.is_built) return HypergraphZError.NotBuilt;
+
+            const n = self.vertices.count();
+            if (n == 0) return try self.allocator.alloc(HypergraphZId, 0);
+
+            var arena: ArenaAllocator = .init(self.allocator);
+            defer arena.deinit();
+            const aa = arena.allocator();
+
+            // Pre-materialize each vertex's clique-expansion neighbor set
+            // (deduplicated, excluding self). Done once so the iterative DFS
+            // can index by frame.
+            var nbrs: AutoHashMapUnmanaged(HypergraphZId, []HypergraphZId) = .empty;
+            try nbrs.ensureTotalCapacity(aa, @intCast(n));
+            {
+                var seen: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+                var v_it = self.vertices.iterator();
+                while (v_it.next()) |kv| {
+                    const vid = kv.key_ptr.*;
+                    seen.clearRetainingCapacity();
+                    try seen.put(aa, vid, {});
+                    var list: ArrayList(HypergraphZId) = .empty;
+                    for (kv.value_ptr.relations.items) |hid| {
+                        const hyperedge = self.hyperedges.get(hid).?;
+                        for (hyperedge.relations.items) |other| {
+                            const gop = try seen.getOrPut(aa, other);
+                            if (!gop.found_existing) try list.append(aa, other);
+                        }
+                    }
+                    nbrs.putAssumeCapacity(vid, try list.toOwnedSlice(aa));
+                }
+            }
+
+            var disc: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            var low: AutoHashMapUnmanaged(HypergraphZId, usize) = .empty;
+            var parent: AutoHashMapUnmanaged(HypergraphZId, ?HypergraphZId) = .empty;
+            var is_ap: AutoHashMapUnmanaged(HypergraphZId, void) = .empty;
+
+            const Frame = struct {
+                v: HypergraphZId,
+                neighbors: []const HypergraphZId,
+                idx: usize,
+                children: usize,
+            };
+            var stack: ArrayList(Frame) = .empty;
+
+            var time: usize = 0;
+            var roots = self.vertices.iterator();
+            while (roots.next()) |kv| {
+                const root = kv.key_ptr.*;
+                if (disc.contains(root)) continue;
+
+                try disc.put(aa, root, time);
+                try low.put(aa, root, time);
+                try parent.put(aa, root, null);
+                time += 1;
+                try stack.append(aa, .{
+                    .v = root,
+                    .neighbors = nbrs.get(root).?,
+                    .idx = 0,
+                    .children = 0,
+                });
+
+                while (stack.items.len > 0) {
+                    const top = &stack.items[stack.items.len - 1];
+                    if (top.idx >= top.neighbors.len) {
+                        // Finalize this frame.
+                        const v = top.v;
+                        const v_parent_opt = parent.get(v).?;
+                        const children = top.children;
+                        _ = stack.pop();
+
+                        if (v_parent_opt) |p| {
+                            // Propagate low to parent and apply the non-root AP rule.
+                            const v_low = low.get(v).?;
+                            const p_low = low.get(p).?;
+                            if (v_low < p_low) try low.put(aa, p, v_low);
+                            const p_disc = disc.get(p).?;
+                            // The rule fires only when `p` itself has a parent
+                            // (root case is handled by the children-count test).
+                            if (parent.get(p).? != null and v_low >= p_disc) {
+                                try is_ap.put(aa, p, {});
+                            }
+                        } else if (children >= 2) {
+                            // Root with ≥ 2 tree children is an articulation point.
+                            try is_ap.put(aa, v, {});
+                        }
+                        continue;
+                    }
+
+                    const v = top.v;
+                    const u = top.neighbors[top.idx];
+                    top.idx += 1;
+
+                    if (!disc.contains(u)) {
+                        // Tree edge: descend.
+                        try disc.put(aa, u, time);
+                        try low.put(aa, u, time);
+                        try parent.put(aa, u, v);
+                        time += 1;
+                        top.children += 1;
+                        try stack.append(aa, .{
+                            .v = u,
+                            .neighbors = nbrs.get(u).?,
+                            .idx = 0,
+                            .children = 0,
+                        });
+                        continue;
+                    }
+
+                    // Already-discovered neighbor. Skip the tree edge back to
+                    // our parent (in our deduplicated view there is at most
+                    // one `v ↔ parent` adjacency); otherwise it's a back edge
+                    // updating low.
+                    if (parent.get(v).?) |p| {
+                        if (u == p) continue;
+                    }
+                    const u_disc = disc.get(u).?;
+                    const v_low = low.get(v).?;
+                    if (u_disc < v_low) try low.put(aa, v, u_disc);
+                }
+            }
+
+            // Emit articulation points in the canonical vertex iteration order
+            // so callers get a deterministic result.
+            var out: ArrayList(HypergraphZId) = .empty;
+            errdefer out.deinit(self.allocator);
+            var v_it = self.vertices.iterator();
+            while (v_it.next()) |kv| {
+                if (is_ap.contains(kv.key_ptr.*)) try out.append(self.allocator, kv.key_ptr.*);
+            }
+            const owned = try out.toOwnedSlice(self.allocator);
+            debugAt(@src(), "{} cut vertices", .{owned.len});
+            return owned;
+        }
+
         // ============================================================
         // Projections
         // ============================================================

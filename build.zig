@@ -1,6 +1,6 @@
 const std = @import("std");
 const HypergraphZPath = "src/hypergraphz.zig";
-const BenchPath = "src/bench.zig";
+const BenchPath = "bench/main.zig";
 const TestRootPath = "tests/root.zig";
 
 pub fn build(b: *std.Build) void {
@@ -61,7 +61,7 @@ pub fn build(b: *std.Build) void {
     // Format step.
     const fmt_step = b.step("fmt", "Format all source files");
     const fmt = b.addFmt(.{
-        .paths = &.{ HypergraphZPath, BenchPath, "build.zig", "tests", "examples" },
+        .paths = &.{ HypergraphZPath, "bench", "build.zig", "tests", "examples" },
     });
     fmt_step.dependOn(&fmt.step);
 
@@ -77,6 +77,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path(BenchPath),
             .target = target,
             .optimize = optimize,
+            .imports = &.{.{ .name = "hypergraphz", .module = root_module }},
         }),
     });
     check_step.dependOn(&bench_check.step);
@@ -101,6 +102,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = bench_source_file,
         .target = target,
         .optimize = .ReleaseFast,
+        .imports = &.{.{ .name = "hypergraphz", .module = root_module }},
     });
 
     const bench_step = b.step("bench", "Run benchmarks");

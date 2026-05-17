@@ -454,6 +454,51 @@ pub fn main() !void {
         if (ns.len == 0) try w.interface.print("(none)", .{});
         try w.interface.print("\n", .{});
     }
+    try w.interface.print("\n", .{});
+
+    // ── 18. Cut vertices (articulation points) ────────────────────────────────
+    // A cut vertex is a researcher whose removal would split the collaboration
+    // network into disconnected components — a structural single point of failure.
+    // findCutVertices uses clique-expansion adjacency: two researchers are
+    // neighbours if they share any paper, regardless of author-list position.
+
+    try w.interface.print("Cut vertices (articulation points)\n", .{});
+    const cuts = try g.findCutVertices();
+    defer allocator.free(cuts);
+    if (cuts.len == 0) {
+        try w.interface.print("  Main network: none — resilient to any single researcher departing\n", .{});
+    } else {
+        for (cuts) |vid| try w.interface.print("  {s}\n", .{(try g.getVertex(vid)).name});
+    }
+
+    // Synthetic chain: Ana – Bek – Cy – {Dan, Eli}.
+    // Bek bridges Ana to the rest; Cy bridges {Ana, Bek} to {Dan, Eli}.
+    {
+        var chain_graph = try Graph.init(allocator, .{
+            .vertices_capacity = 5,
+            .hyperedges_capacity = 3,
+        });
+        defer chain_graph.deinit();
+        const ana = try chain_graph.createVertexAssumeCapacity(.{ .name = "Ana" });
+        const bek = try chain_graph.createVertexAssumeCapacity(.{ .name = "Bek" });
+        const cy = try chain_graph.createVertexAssumeCapacity(.{ .name = "Cy" });
+        const dan = try chain_graph.createVertexAssumeCapacity(.{ .name = "Dan" });
+        const eli = try chain_graph.createVertexAssumeCapacity(.{ .name = "Eli" });
+        const q1 = try chain_graph.createHyperedgeAssumeCapacity(.{ .title = "Ana-Bek collab", .year = 2022, .citations = 1 });
+        try chain_graph.appendVerticesToHyperedge(q1, &.{ ana, bek });
+        const q2 = try chain_graph.createHyperedgeAssumeCapacity(.{ .title = "Bek-Cy collab", .year = 2023, .citations = 1 });
+        try chain_graph.appendVerticesToHyperedge(q2, &.{ bek, cy });
+        const q3 = try chain_graph.createHyperedgeAssumeCapacity(.{ .title = "Cy-Dan-Eli collab", .year = 2024, .citations = 1 });
+        try chain_graph.appendVerticesToHyperedge(q3, &.{ cy, dan, eli });
+        try chain_graph.build();
+
+        const chain_cuts = try chain_graph.findCutVertices();
+        defer allocator.free(chain_cuts);
+        try w.interface.print("  Synthetic chain (Ana-Bek-Cy-{{Dan,Eli}}): {} cut vertex(es):", .{chain_cuts.len});
+        for (chain_cuts) |vid| try w.interface.print(" {s}", .{(try chain_graph.getVertex(vid)).name});
+        try w.interface.print("\n", .{});
+    }
+    try w.interface.print("\n", .{});
 
     try w.interface.flush();
 }

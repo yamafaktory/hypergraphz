@@ -676,3 +676,151 @@ test "get nestedness profile" {
         try expect(prof.data[1].total == 2);
     }
 }
+
+test "find cut vertices" {
+    // NotBuilt guard.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try expectError(HypergraphZError.NotBuilt, graph.findCutVertices());
+    }
+
+    // Empty graph: no cut vertices.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        try graph.build();
+        const result = try graph.findCutVertices();
+        defer std.testing.allocator.free(result);
+        try expect(result.len == 0);
+    }
+
+    // Single vertex: no cut vertices.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        _ = try graph.createVertexAssumeCapacity(.{});
+        try graph.build();
+        const result = try graph.findCutVertices();
+        defer std.testing.allocator.free(result);
+        try expect(result.len == 0);
+    }
+
+    // Two vertices, one hyperedge: neither is a cut vertex.
+    // Removing either vertex leaves a single-vertex graph (still 1 component).
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v_a = try graph.createVertexAssumeCapacity(.{});
+        const v_b = try graph.createVertexAssumeCapacity(.{});
+        const he = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(he, &.{ v_a, v_b });
+        try graph.build();
+        const result = try graph.findCutVertices();
+        defer std.testing.allocator.free(result);
+        try expect(result.len == 0);
+    }
+
+    // Path v_a – v_b – v_c via two binary hyperedges: v_b is the only cut vertex.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v_a = try graph.createVertexAssumeCapacity(.{});
+        const v_b = try graph.createVertexAssumeCapacity(.{});
+        const v_c = try graph.createVertexAssumeCapacity(.{});
+        const h1 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h1, &.{ v_a, v_b });
+        const h2 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h2, &.{ v_b, v_c });
+        try graph.build();
+        const result = try graph.findCutVertices();
+        defer std.testing.allocator.free(result);
+        try expect(result.len == 1);
+        try expect(result[0] == v_b);
+    }
+
+    // Hyperedge {v_a, v_b, v_c}: clique-expansion makes all three mutually
+    // adjacent, so no vertex is a cut vertex.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v_a = try graph.createVertexAssumeCapacity(.{});
+        const v_b = try graph.createVertexAssumeCapacity(.{});
+        const v_c = try graph.createVertexAssumeCapacity(.{});
+        const he = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(he, &.{ v_a, v_b, v_c });
+        try graph.build();
+        const result = try graph.findCutVertices();
+        defer std.testing.allocator.free(result);
+        try expect(result.len == 0);
+        _ = .{ v_a, v_b, v_c };
+    }
+
+    // Star: center connected to three leaves via separate binary hyperedges.
+    // Removing center leaves three isolated leaves → center is the only cut vertex.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const center = try graph.createVertexAssumeCapacity(.{});
+        const l1 = try graph.createVertexAssumeCapacity(.{});
+        const l2 = try graph.createVertexAssumeCapacity(.{});
+        const l3 = try graph.createVertexAssumeCapacity(.{});
+        const h1 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h1, &.{ center, l1 });
+        const h2 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h2, &.{ center, l2 });
+        const h3 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h3, &.{ center, l3 });
+        try graph.build();
+        const result = try graph.findCutVertices();
+        defer std.testing.allocator.free(result);
+        try expect(result.len == 1);
+        try expect(result[0] == center);
+    }
+
+    // Triangle {v_a, v_b, v_c} bridged to tail v_c – v_d – v_e.
+    // v_c separates the clique from {v_d, v_e}; v_d separates v_c from v_e.
+    // Cut vertices: v_c and v_d, returned in insertion order.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v_a = try graph.createVertexAssumeCapacity(.{});
+        const v_b = try graph.createVertexAssumeCapacity(.{});
+        const v_c = try graph.createVertexAssumeCapacity(.{});
+        const v_d = try graph.createVertexAssumeCapacity(.{});
+        const v_e = try graph.createVertexAssumeCapacity(.{});
+        const h1 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h1, &.{ v_a, v_b, v_c });
+        const h2 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h2, &.{ v_c, v_d });
+        const h3 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h3, &.{ v_d, v_e });
+        try graph.build();
+        const result = try graph.findCutVertices();
+        defer std.testing.allocator.free(result);
+        try expect(result.len == 2);
+        try expect(result[0] == v_c);
+        try expect(result[1] == v_d);
+        _ = .{ v_a, v_b };
+    }
+
+    // Multiple components: v_b is a cut vertex in {v_a, v_b, v_c};
+    // the isolated fourth vertex contributes no cut vertices.
+    {
+        var graph = try h.scaffold();
+        defer graph.deinit();
+        const v_a = try graph.createVertexAssumeCapacity(.{});
+        const v_b = try graph.createVertexAssumeCapacity(.{});
+        const v_c = try graph.createVertexAssumeCapacity(.{});
+        _ = try graph.createVertexAssumeCapacity(.{}); // isolated
+        const h1 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h1, &.{ v_a, v_b });
+        const h2 = try graph.createHyperedgeAssumeCapacity(.{});
+        try graph.appendVerticesToHyperedge(h2, &.{ v_b, v_c });
+        try graph.build();
+        const result = try graph.findCutVertices();
+        defer std.testing.allocator.free(result);
+        try expect(result.len == 1);
+        try expect(result[0] == v_b);
+    }
+}
